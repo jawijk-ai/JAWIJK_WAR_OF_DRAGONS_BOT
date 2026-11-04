@@ -37,7 +37,6 @@ class MainActivity : Activity() {
     private val scanTask = object : Runnable {
         override fun run() {
             if (!running) return
-
             analyzeScreen()
             handler.postDelayed(this, 3000)
         }
@@ -97,14 +96,7 @@ class MainActivity : Activity() {
         scanStatus.isTextSelectable = true
 
         val resultScroll = ScrollView(this)
-
-        resultScroll.addView(
-            scanStatus,
-            ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
+        resultScroll.addView(scanStatus)
 
         layout.addView(
             resultScroll,
@@ -116,21 +108,17 @@ class MainActivity : Activity() {
 
         val addButton = Button(this)
         addButton.text = "DODAJ ZEBRANY SUROWIEC"
-
         addButton.setOnClickListener {
             collected++
             updateStatus()
         }
-
         layout.addView(addButton)
 
         val backButton = Button(this)
         backButton.text = "POWRÓT DO GRY"
-
         backButton.setOnClickListener {
             showMainPage()
         }
-
         layout.addView(backButton)
 
         webContainer = FrameLayout(this)
@@ -158,7 +146,6 @@ class MainActivity : Activity() {
         setContentView(layout)
 
         updateStatus()
-
         webView.loadUrl("https://www.warofdragons.com/")
     }
 
@@ -167,7 +154,6 @@ class MainActivity : Activity() {
 
         running = true
         scanCount = 0
-
         scanStatus.text = "Uruchomiono analizę co 3 sekundy."
 
         handler.removeCallbacks(scanTask)
@@ -178,11 +164,8 @@ class MainActivity : Activity() {
 
     private fun stopAnalysis() {
         running = false
-
         handler.removeCallbacks(scanTask)
-
         scanStatus.text = "Analiza zatrzymana."
-
         updateStatus()
     }
 
@@ -190,7 +173,6 @@ class MainActivity : Activity() {
         if (scanInProgress) return
 
         val activeView = getActiveWebView()
-
         scanInProgress = true
 
         val script = """
@@ -225,7 +207,6 @@ class MainActivity : Activity() {
                         Math.round(rect.y);
 
                     if (seen[key]) return;
-
                     seen[key] = true;
 
                     results.push({
@@ -241,11 +222,7 @@ class MainActivity : Activity() {
                 }
 
                 document.querySelectorAll('img').forEach(function(el) {
-                    addItem(
-                        el,
-                        'IMG',
-                        el.currentSrc || el.src || ''
-                    );
+                    addItem(el, 'IMG', el.currentSrc || el.src || '');
                 });
 
                 document.querySelectorAll('svg').forEach(function(el) {
@@ -289,13 +266,11 @@ class MainActivity : Activity() {
                 if (result == null || result == "null") {
                     scanStatus.text =
                         "Skan $scanCount: brak odpowiedzi strony."
-
                     updateStatus()
                     return@evaluateJavascript
                 }
 
                 val json = JSONObject(result)
-
                 val total = json.optInt("total", 0)
                 val images = json.optJSONArray("images")
 
@@ -310,15 +285,9 @@ class MainActivity : Activity() {
                     .append("\n\n")
 
                 if (images == null || images.length() == 0) {
-
-                    output.append(
-                        "Nie znaleziono obrazków ani ikon."
-                    )
-
+                    output.append("Nie znaleziono obrazków ani ikon.")
                 } else {
-
                     for (i in 0 until images.length()) {
-
                         val item = images.getJSONObject(i)
 
                         output.append("ELEMENT ")
@@ -342,7 +311,6 @@ class MainActivity : Activity() {
                             .append("\n")
 
                         val alt = item.optString("alt")
-
                         if (alt.isNotBlank()) {
                             output.append("Opis: ")
                                 .append(alt)
@@ -350,7 +318,6 @@ class MainActivity : Activity() {
                         }
 
                         val url = item.optString("url")
-
                         if (url.isNotBlank()) {
                             output.append("Adres: ")
                                 .append(url)
@@ -364,7 +331,6 @@ class MainActivity : Activity() {
                 scanStatus.text = output.toString()
 
             } catch (e: Exception) {
-
                 scanStatus.text =
                     "Błąd odczytu skanowania:\n${e.message}\n\nWynik:\n$result"
             }
@@ -376,10 +342,7 @@ class MainActivity : Activity() {
     private fun getActiveWebView(): WebView {
         val popup = popupWebView
 
-        return if (
-            popup != null &&
-            popup.visibility == View.VISIBLE
-        ) {
+        return if (popup != null && popup.visibility == View.VISIBLE) {
             popup
         } else {
             webView
@@ -387,7 +350,6 @@ class MainActivity : Activity() {
     }
 
     private fun configureWebView(view: WebView) {
-
         view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -400,7 +362,6 @@ class MainActivity : Activity() {
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-
             mixedContentMode =
                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
@@ -411,7 +372,6 @@ class MainActivity : Activity() {
         }
 
         view.webViewClient = object : WebViewClient() {
-
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: android.webkit.WebResourceRequest
@@ -421,7 +381,6 @@ class MainActivity : Activity() {
         }
 
         view.webChromeClient = object : WebChromeClient() {
-
             override fun onCreateWindow(
                 view: WebView,
                 isDialog: Boolean,
@@ -438,13 +397,11 @@ class MainActivity : Activity() {
     }
 
     private fun createPopup(resultMsg: Message): Boolean {
-
         popupWebView?.let {
             closePopup(it)
         }
 
         val popup = WebView(this)
-
         popupWebView = popup
 
         configureWebView(popup)
@@ -463,16 +420,13 @@ class MainActivity : Activity() {
             resultMsg.obj as WebView.WebViewTransport
 
         transport.webView = popup
-
         resultMsg.sendToTarget()
 
         return true
     }
 
     private fun closePopup(window: WebView) {
-
         webContainer.removeView(window)
-
         window.stopLoading()
         window.destroy()
 
@@ -484,7 +438,6 @@ class MainActivity : Activity() {
     }
 
     private fun showMainPage() {
-
         popupWebView?.let {
             it.visibility = View.GONE
         }
@@ -494,7 +447,6 @@ class MainActivity : Activity() {
     }
 
     private fun updateStatus() {
-
         status.text =
             "Zebrane: $collected | Analiza: " +
                 if (running) "AKTYWNA" else "WYŁĄCZONA"
@@ -502,37 +454,25 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-
         val popup = popupWebView
 
-        if (
-            popup != null &&
-            popup.visibility == View.VISIBLE
-        ) {
-
+        if (popup != null && popup.visibility == View.VISIBLE) {
             if (popup.canGoBack()) {
                 popup.goBack()
             } else {
                 showMainPage()
             }
-
         } else if (webView.canGoBack()) {
-
             webView.goBack()
-
         } else {
-
             super.onBackPressed()
         }
     }
 
     override fun onDestroy() {
-
         stopAnalysis()
-
         popupWebView?.destroy()
         webView.destroy()
-
         super.onDestroy()
     }
 }
