@@ -83,7 +83,7 @@ class MainActivity : Activity() {
         fishName = EditText(this)
         fishName.hint = "Wpisz nazwę ryby"
         fishName.textSize = 14f
-        fishName.singleLine = true
+        fishName.setSingleLine(true)
         layout.addView(fishName)
 
         webContainer = FrameLayout(this)
