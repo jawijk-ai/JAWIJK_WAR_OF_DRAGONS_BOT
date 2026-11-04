@@ -5,8 +5,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -18,6 +16,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.FrameLayout
+import org.json.JSONTokener
 
 class MainActivity : Activity() {
 
@@ -30,15 +29,13 @@ class MainActivity : Activity() {
 
     private var running = false
     private var collected = 0
+    private var scanCount = 0
+    private var scanInProgress = false
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private var previousFrame: Bitmap? = null
-    private var scanCount = 0
-
     private val scanTask = object : Runnable {
         override fun run() {
-
             if (!running) return
 
             analyzeScreen()
@@ -67,14 +64,12 @@ class MainActivity : Activity() {
 
         val startButton = Button(this)
         startButton.text = "START ANALIZY"
-
         startButton.setOnClickListener {
             startAnalysis()
         }
 
         val stopButton = Button(this)
         stopButton.text = "STOP ANALIZY"
-
         stopButton.setOnClickListener {
             stopAnalysis()
         }
@@ -91,10 +86,25 @@ class MainActivity : Activity() {
 
         layout.addView(buttons)
 
+        val resultTitle = TextView(this)
+        resultTitle.text = "WYKRYTE ELEMENTY GRY:"
+        resultTitle.setPadding(10, 5, 10, 5)
+        layout.addView(resultTitle)
+
         scanStatus = TextView(this)
-        scanStatus.text = "Analiza obrazu: wyłączona"
-        scanStatus.setPadding(10, 8, 10, 8)
-        layout.addView(scanStatus)
+        scanStatus.text = "Oczekiwanie na skanowanie..."
+        scanStatus.textSize = 11f
+        scanStatus.setPadding(10, 5, 10, 5)
+        scanStatus.maxLines = 20
+        scanStatus.isTextSelectable = true
+
+        layout.addView(
+            scanStatus,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                180
+            )
+        )
 
         val addButton = Button(this)
         addButton.text = "DODAJ ZEBRANY SUROWIEC"
@@ -151,10 +161,7 @@ class MainActivity : Activity() {
         running = true
         scanCount = 0
 
-        previousFrame?.recycle()
-        previousFrame = null
-
-        scanStatus.text = "Uruchomiono analizę obrazu co 3 sekundy."
+        scanStatus.text = "Uruchomiono analizę co 3 sekundy."
 
         handler.removeCallbacks(scanTask)
         handler.post(scanTask)
@@ -168,128 +175,122 @@ class MainActivity : Activity() {
 
         handler.removeCallbacks(scanTask)
 
-        scanStatus.text = "Analiza obrazu zatrzymana."
+        scanStatus.text = "Analiza zatrzymana."
 
         updateStatus()
     }
 
     private fun analyzeScreen() {
 
+        if (scanInProgress) return
+
         val activeView = getActiveWebView()
 
-        if (activeView.width <= 0 ||
-            activeView.height <= 0
-        ) {
-            scanStatus.text = "Oczekiwanie na ekran gry..."
-            return
-        }
+        scanInProgress = true
 
-        try {
+        val script = """
+            (function() {
 
-            val bitmap = Bitmap.createBitmap(
-                activeView.width,
-                activeView.height,
-                Bitmap.Config.ARGB_8888
-            )
+                const elements = Array.from(
+                    document.querySelectorAll(
+                        'a, button, img, [role="button"], ' +
+                        '[onclick], [style*="background"]'
+                    )
+                );
 
-            val canvas = Canvas(bitmap)
-            activeView.draw(canvas)
+                const results = [];
 
-            val currentFrame = Bitmap.createScaledBitmap(
-                bitmap,
-                64,
-                64,
-                true
-            )
+                elements.forEach(function(el) {
 
-            bitmap.recycle()
+                    const r = el.getBoundingClientRect();
+                    const s = getComputedStyle(el);
+
+                    if (
+                        r.width <= 10 ||
+                        r.height <= 10 ||
+                        s.display === 'none' ||
+                        s.visibility === 'hidden' ||
+                        s.opacity === '0' ||
+                        r.bottom <= 0 ||
+                        r.right <= 0 ||
+                        r.top >= window.innerHeight ||
+                        r.left >= window.innerWidth
+                    ) {
+                        return;
+                    }
+
+                    const bg = s.backgroundImage;
+
+                    results.push({
+
+                        tag: el.tagName,
+
+                        text: (
+                            el.innerText || ''
+                        ).trim().slice(0, 40),
+
+                        title: el.title || '',
+
+                        alt: el.alt || '',
+
+                        src: el.currentSrc || el.src || '',
+
+                        background: (
+                            bg && bg !== 'none'
+                            ? bg.slice(0, 300)
+                            : ''
+                        ),
+
+                        className: String(
+                            el.className || ''
+                        ).slice(0, 100),
+
+                        x: Math.round(r.x),
+
+                        y: Math.round(r.y),
+
+                        width: Math.round(r.width),
+
+                        height: Math.round(r.height)
+
+                    });
+
+                });
+
+                return JSON.stringify(
+                    results.slice(0, 80)
+                );
+
+            })();
+        """.trimIndent()
+
+        activeView.evaluateJavascript(script) { result ->
+
+            scanInProgress = false
+
+            if (!running) return@evaluateJavascript
 
             scanCount++
 
-            val oldFrame = previousFrame
+            val decoded = try {
 
-            if (oldFrame == null) {
+                JSONTokener(result ?: "null").nextValue()
+                    as? String ?: "Brak wyników"
 
-                scanStatus.text =
-                    "Pierwszy obraz zapisany. Skan: $scanCount"
+            } catch (e: Exception) {
 
-            } else {
-
-                val difference = compareFrames(
-                    oldFrame,
-                    currentFrame
-                )
-
-                if (difference > 5) {
-
-                    scanStatus.text =
-                        "Wykryto zmianę obrazu: " +
-                        "$difference% | Skan: $scanCount"
-
-                } else {
-
-                    scanStatus.text =
-                        "Ekran bez większych zmian | " +
-                        "Skan: $scanCount"
-                }
-
-                oldFrame.recycle()
+                result ?: "Brak wyników"
             }
 
-            previousFrame = currentFrame
-
-        } catch (error: Exception) {
+            val displayResult = decoded.take(4500)
 
             scanStatus.text =
-                "Błąd analizy: ${error.message}"
+                "Skan: $scanCount\n" +
+                "Elementy strony:\n" +
+                displayResult
+
+            updateStatus()
         }
-    }
-
-    private fun compareFrames(
-        oldFrame: Bitmap,
-        newFrame: Bitmap
-    ): Int {
-
-        var changedPixels = 0
-        val totalPixels = 64 * 64
-
-        for (y in 0 until 64 step 2) {
-
-            for (x in 0 until 64 step 2) {
-
-                val oldColor = oldFrame.getPixel(x, y)
-                val newColor = newFrame.getPixel(x, y)
-
-                val redDifference =
-                    kotlin.math.abs(
-                        android.graphics.Color.red(oldColor) -
-                        android.graphics.Color.red(newColor)
-                    )
-
-                val greenDifference =
-                    kotlin.math.abs(
-                        android.graphics.Color.green(oldColor) -
-                        android.graphics.Color.green(newColor)
-                    )
-
-                val blueDifference =
-                    kotlin.math.abs(
-                        android.graphics.Color.blue(oldColor) -
-                        android.graphics.Color.blue(newColor)
-                    )
-
-                val difference =
-                    redDifference +
-                    greenDifference +
-                    blueDifference
-
-                if (difference > 100) {
-                    changedPixels++
-                }
-            }
-        }
-
-        return (changedPixels * 4 * 100) / totalPixels
     }
 
     private fun getActiveWebView(): WebView {
@@ -308,9 +309,11 @@ class MainActivity : Activity() {
     private fun configureWebView(view: WebView) {
 
         view.settings.apply {
+
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
+
             loadsImagesAutomatically = true
 
             javaScriptCanOpenWindowsAutomatically = true
@@ -328,6 +331,7 @@ class MainActivity : Activity() {
         }
 
         CookieManager.getInstance().apply {
+
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(view, true)
         }
@@ -393,6 +397,7 @@ class MainActivity : Activity() {
     private fun closePopup(window: WebView) {
 
         webContainer.removeView(window)
+
         window.stopLoading()
         window.destroy()
 
@@ -408,7 +413,9 @@ class MainActivity : Activity() {
         val popup = popupWebView
 
         if (popup != null) {
+
             popup.visibility = View.GONE
+
             webView.visibility = View.VISIBLE
             webView.bringToFront()
         }
@@ -437,8 +444,11 @@ class MainActivity : Activity() {
             }
 
         } else if (webView.canGoBack()) {
+
             webView.goBack()
+
         } else {
+
             super.onBackPressed()
         }
     }
@@ -446,8 +456,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
 
         stopAnalysis()
-
-        previousFrame?.recycle()
 
         popupWebView?.destroy()
         webView.destroy()
