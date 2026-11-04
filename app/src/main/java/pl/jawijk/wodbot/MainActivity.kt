@@ -4,7 +4,6 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -45,8 +44,6 @@ class MainActivity : Activity() {
 
     private val fishList = mutableListOf<FishResource>()
 
-    private var popupWebView: WebView? = null
-
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (!analysisRunning) return
@@ -61,15 +58,15 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         CookieManager.getInstance().setAcceptCookie(true)
-        CookieManager.getInstance()
-            .setAcceptThirdPartyCookies(WebView(this), true)
 
         createInterface()
         configureWebView()
 
         loadFishCatalog()
 
-        gameWebView.loadUrl("https://www.warofdragons.com/")
+        gameWebView.loadUrl(
+            "https://www.warofdragons.com/"
+        )
     }
 
     private fun createInterface() {
@@ -101,10 +98,10 @@ class MainActivity : Activity() {
         )
 
         categorySpinner.onItemSelectedListener =
-            object : android.widget.AdapterView.OnItemSelectedListener {
+            object : AdapterView.OnItemSelectedListener {
 
                 override fun onItemSelected(
-                    parent: android.widget.AdapterView<*>?,
+                    parent: AdapterView<*>?,
                     view: View?,
                     position: Int,
                     id: Long
@@ -114,14 +111,13 @@ class MainActivity : Activity() {
                 }
 
                 override fun onNothingSelected(
-                    parent: android.widget.AdapterView<*>?
+                    parent: AdapterView<*>?
                 ) {}
             }
 
         mainLayout.addView(categorySpinner)
 
         fishSpinner = Spinner(this)
-
         mainLayout.addView(fishSpinner)
 
         timeSpinner = Spinner(this)
@@ -146,10 +142,10 @@ class MainActivity : Activity() {
         timeSpinner.setSelection(4)
 
         timeSpinner.onItemSelectedListener =
-            object : android.widget.AdapterView.OnItemSelectedListener {
+            object : AdapterView.OnItemSelectedListener {
 
                 override fun onItemSelected(
-                    parent: android.widget.AdapterView<*>?,
+                    parent: AdapterView<*>?,
                     view: View?,
                     position: Int,
                     id: Long
@@ -179,7 +175,7 @@ class MainActivity : Activity() {
                 }
 
                 override fun onNothingSelected(
-                    parent: android.widget.AdapterView<*>?
+                    parent: AdapterView<*>?
                 ) {}
             }
 
@@ -280,17 +276,33 @@ class MainActivity : Activity() {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
+
         settings.loadsImagesAutomatically = true
         settings.javaScriptCanOpenWindowsAutomatically = true
-        settings.setSupportMultipleWindows(true)
+
+        // Nie tworzymy niewidocznego okna popup.
+        settings.setSupportMultipleWindows(false)
+
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
+
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
+
         settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+        settings.allowFileAccess = true
+        settings.allowContentAccess = true
+
+        gameWebView.isFocusable = true
+        gameWebView.isFocusableInTouchMode = true
+        gameWebView.isClickable = true
+        gameWebView.isLongClickable = true
 
         gameWebView.setBackgroundColor(Color.BLACK)
 
+        // Nie dodajemy OnTouchListener, który mógłby
+        // przechwytywać kliknięcia w grze.
         gameWebView.webViewClient = object : WebViewClient() {
 
             override fun onPageFinished(
@@ -299,42 +311,18 @@ class MainActivity : Activity() {
             ) {
                 super.onPageFinished(view, url)
 
-                scanStatus.text =
-                    "Gra załadowana. Wybierz surowiec i naciśnij START."
+                scanStatus.text = "Strona gry załadowana."
             }
-        }
 
-        gameWebView.webChromeClient = object : WebChromeClient() {
-
-            override fun onCreateWindow(
+            override fun shouldOverrideUrlLoading(
                 view: WebView?,
-                isDialog: Boolean,
-                isUserGesture: Boolean,
-                resultMsg: Message?
+                url: String?
             ): Boolean {
-
-                val popup = WebView(this@MainActivity)
-
-                popup.settings.javaScriptEnabled = true
-                popup.settings.domStorageEnabled = true
-                popup.settings.databaseEnabled = true
-                popup.settings.loadsImagesAutomatically = true
-
-                popup.webViewClient = WebViewClient()
-
-                popup.webChromeClient = this
-
-                popupWebView = popup
-
-                val transport = resultMsg?.obj as? WebView.WebViewTransport
-                    ?: return false
-
-                transport.webView = popup
-                resultMsg.sendToTarget()
-
-                return true
+                return false
             }
         }
+
+        gameWebView.webChromeClient = WebChromeClient()
     }
 
     private fun loadFishCatalog() {
@@ -365,6 +353,7 @@ class MainActivity : Activity() {
 
         val js = """
             (function() {
+
                 let result = [];
 
                 let rows = document.querySelectorAll(
@@ -372,6 +361,7 @@ class MainActivity : Activity() {
                 );
 
                 rows.forEach(function(row) {
+
                     let name = (
                         row.innerText ||
                         row.textContent ||
@@ -389,7 +379,9 @@ class MainActivity : Activity() {
                 });
 
                 if (result.length === 0) {
+
                     document.querySelectorAll("a").forEach(function(a) {
+
                         let name = (
                             a.innerText ||
                             a.textContent ||
@@ -407,13 +399,17 @@ class MainActivity : Activity() {
                 }
 
                 return JSON.stringify(result);
+
             })();
         """
 
         catalogView.evaluateJavascript(js) { result ->
 
             try {
-                val decoded = JSONArray("[$result]").getString(0)
+
+                val decoded =
+                    JSONArray("[$result]").getString(0)
+
                 val array = JSONArray(decoded)
 
                 fishList.clear()
@@ -424,8 +420,11 @@ class MainActivity : Activity() {
 
                     val item = array.getJSONObject(i)
 
-                    val name = item.optString("name", "").trim()
-                    val details = item.optString("details", "").trim()
+                    val name =
+                        item.optString("name", "").trim()
+
+                    val details =
+                        item.optString("details", "").trim()
 
                     if (
                         name.isNotEmpty() &&
@@ -443,12 +442,12 @@ class MainActivity : Activity() {
                 showFishList()
 
                 scanStatus.text =
-                    "Biblioteka pobrana. Liczba pozycji: ${fishList.size}"
+                    "Biblioteka pobrana. Pozycje: ${fishList.size}"
 
             } catch (e: Exception) {
 
                 scanStatus.text =
-                    "Nie udało się odczytać biblioteki: ${e.message}"
+                    "Błąd biblioteki: ${e.message}"
             }
         }
     }
@@ -460,20 +459,38 @@ class MainActivity : Activity() {
         val filtered = if (
             selectedCategory == "Ryby Mystras"
         ) {
+
             fishList.filter {
-                it.name.contains("Mystras", ignoreCase = true) ||
-                it.details.contains("Mystras", ignoreCase = true)
+                it.name.contains(
+                    "Mystras",
+                    ignoreCase = true
+                ) ||
+                it.details.contains(
+                    "Mystras",
+                    ignoreCase = true
+                )
             }
+
         } else {
+
             fishList.filter {
-                !it.name.contains("Mystras", ignoreCase = true) &&
-                !it.details.contains("Mystras", ignoreCase = true)
+                !it.name.contains(
+                    "Mystras",
+                    ignoreCase = true
+                ) &&
+                !it.details.contains(
+                    "Mystras",
+                    ignoreCase = true
+                )
             }
         }
 
         val names = if (filtered.isEmpty()) {
+
             listOf("Brak pozycji w tej kategorii")
+
         } else {
+
             filtered.map { it.name }
         }
 
@@ -486,26 +503,30 @@ class MainActivity : Activity() {
         fishSpinner.adapter = adapter
 
         fishSpinner.onItemSelectedListener =
-            object : android.widget.AdapterView.OnItemSelectedListener {
+            object : AdapterView.OnItemSelectedListener {
 
                 override fun onItemSelected(
-                    parent: android.widget.AdapterView<*>?,
+                    parent: AdapterView<*>?,
                     view: View?,
                     position: Int,
                     id: Long
                 ) {
+
                     if (filtered.isNotEmpty()) {
+
                         selectedFish = filtered[position].name
 
                         scanStatus.text =
                             "Wybrany surowiec: $selectedFish"
+
                     } else {
+
                         selectedFish = ""
                     }
                 }
 
                 override fun onNothingSelected(
-                    parent: android.widget.AdapterView<*>?
+                    parent: AdapterView<*>?
                 ) {}
             }
     }
@@ -578,9 +599,11 @@ class MainActivity : Activity() {
                             frames++;
 
                             try {
+
                                 if (frame.contentDocument) {
                                     search(frame.contentDocument);
                                 }
+
                             } catch(e) {}
                         });
 
@@ -606,11 +629,13 @@ class MainActivity : Activity() {
                 let img = images[index];
 
                 try {
+
                     img.scrollIntoView({
                         behavior: "smooth",
                         block: "center",
                         inline: "center"
                     });
+
                 } catch(e) {}
 
                 let oldOutline = img.style.outline;
@@ -669,8 +694,10 @@ class MainActivity : Activity() {
             try {
 
                 if (result == null || result == "null") {
+
                     scanStatus.text =
-                        "Brak odpowiedzi ze skanera."
+                        "Brak odpowiedzi skanera."
+
                     return@evaluateJavascript
                 }
 
@@ -701,8 +728,7 @@ class MainActivity : Activity() {
                         "Znalezione obrazki: 0\n" +
                         "Ramki iframe: $frames\n" +
                         "Elementy Canvas: $canvases\n" +
-                        "Wybrany surowiec: $selectedFish\n" +
-                        "Sprawdzamy sposób wyświetlania grafiki gry."
+                        "Wybrany surowiec: $selectedFish"
                 }
 
             } catch (e: Exception) {
@@ -719,8 +745,10 @@ class MainActivity : Activity() {
             (function() {
 
                 document.querySelectorAll("img").forEach(function(img) {
+
                     img.style.removeProperty("outline");
                     img.style.removeProperty("box-shadow");
+
                 });
 
                 return true;
@@ -729,24 +757,17 @@ class MainActivity : Activity() {
         """
 
         gameWebView.evaluateJavascript(js, null)
-
-        popupWebView?.evaluateJavascript(js, null)
     }
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
 
-        if (
-            popupWebView != null &&
-            popupWebView!!.canGoBack()
-        ) {
-            popupWebView!!.goBack()
-            return
-        }
-
         if (gameWebView.canGoBack()) {
+
             gameWebView.goBack()
+
         } else {
+
             super.onBackPressed()
         }
     }
@@ -757,17 +778,13 @@ class MainActivity : Activity() {
 
         handler.removeCallbacks(scanRunnable)
 
-        clearHighlights()
-
-        popupWebView?.destroy()
-        popupWebView = null
+        if (::gameWebView.isInitialized) {
+            clearHighlights()
+            gameWebView.destroy()
+        }
 
         if (::catalogView.isInitialized) {
             catalogView.destroy()
-        }
-
-        if (::gameWebView.isInitialized) {
-            gameWebView.destroy()
         }
 
         super.onDestroy()
