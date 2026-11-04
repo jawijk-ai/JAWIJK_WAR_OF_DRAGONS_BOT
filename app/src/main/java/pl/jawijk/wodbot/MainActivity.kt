@@ -112,14 +112,12 @@ class MainActivity : Activity() {
 
         val startButton = Button(this)
         startButton.text = "START"
-
         startButton.setOnClickListener {
             startAnalysis()
         }
 
         val stopButton = Button(this)
         stopButton.text = "STOP"
-
         stopButton.setOnClickListener {
             stopAnalysis()
         }
@@ -135,6 +133,37 @@ class MainActivity : Activity() {
         )
 
         layout.addView(buttons)
+
+        // PRZYCISKI ZOOM
+
+        val zoomButtons = LinearLayout(this)
+        zoomButtons.orientation = LinearLayout.HORIZONTAL
+
+        val zoomOut = Button(this)
+        zoomOut.text = "POMNIEJSZ −"
+
+        zoomOut.setOnClickListener {
+            (popupWebView ?: webView).zoomBy(0.8f)
+        }
+
+        val zoomIn = Button(this)
+        zoomIn.text = "POWIĘKSZ +"
+
+        zoomIn.setOnClickListener {
+            (popupWebView ?: webView).zoomBy(1.25f)
+        }
+
+        zoomButtons.addView(
+            zoomOut,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        zoomButtons.addView(
+            zoomIn,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        layout.addView(zoomButtons)
 
         val resultTitle = TextView(this)
         resultTitle.text = "WYNIKI ANALIZY:"
@@ -188,6 +217,10 @@ class MainActivity : Activity() {
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
 
+        settings.setSupportZoom(true)
+        settings.builtInZoomControls = true
+        settings.displayZoomControls = false
+
         settings.cacheMode = WebSettings.LOAD_DEFAULT
 
         CookieManager.getInstance().setAcceptCookie(true)
@@ -226,6 +259,9 @@ class MainActivity : Activity() {
                 popup.settings.setSupportMultipleWindows(true)
                 popup.settings.useWideViewPort = true
                 popup.settings.loadWithOverviewMode = true
+                popup.settings.setSupportZoom(true)
+                popup.settings.builtInZoomControls = true
+                popup.settings.displayZoomControls = false
 
                 CookieManager.getInstance().setAcceptCookie(true)
 
@@ -288,7 +324,6 @@ class MainActivity : Activity() {
         scanCount = 0
 
         scanStatus.text = "Rozpoczynam analizę..."
-
         status.text = "ANALIZA AKTYWNA"
 
         handler.removeCallbacks(scanRunnable)
@@ -310,7 +345,6 @@ class MainActivity : Activity() {
         if (!running) return
 
         val activeWebView = popupWebView ?: webView
-
         val selectedFish = fishName.text.toString().trim()
 
         if (selectedFish.isEmpty()) return
@@ -359,7 +393,8 @@ class MainActivity : Activity() {
                         text + " " + title + " " + alt + " " + src
                     ).toLowerCase();
 
-                    var matches = searchable.indexOf(targetLower) !== -1;
+                    var matches =
+                        searchable.indexOf(targetLower) !== -1;
 
                     if (matches) {
 
@@ -424,7 +459,6 @@ class MainActivity : Activity() {
             try {
 
                 val data = JSONObject(result)
-
                 val items = data.optJSONArray("items")
 
                 scanCount++
@@ -465,7 +499,7 @@ class MainActivity : Activity() {
                         "Nie znaleziono pasującego elementu DOM.\n"
                     )
                     output.append(
-                        "Możliwe, że ryba jest rysowana na mapie Canvas."
+                        "Ryba może być rysowana na mapie Canvas/WebGL."
                     )
                 }
 
