@@ -1,4 +1,4 @@
-```kotlin
+kotlin
 package pl.jawijk.wodbot
 
 import android.app.Activity
