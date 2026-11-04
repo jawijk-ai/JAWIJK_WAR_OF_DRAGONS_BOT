@@ -431,7 +431,7 @@ class MainActivity : Activity() {
 
             })();
         """.trimIndent()
-             activeWebView.evaluateJavascript(javascript) { result ->
+                activeWebView.evaluateJavascript(javascript) { result ->
 
             try {
 
@@ -549,4 +549,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-}   
+}
