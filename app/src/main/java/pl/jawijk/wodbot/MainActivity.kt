@@ -2,13 +2,18 @@ package pl.jawijk.wodbot
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Message
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -18,11 +23,29 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
     private lateinit var status: TextView
+    private lateinit var scanStatus: TextView
     private lateinit var webContainer: FrameLayout
 
     private var popupWebView: WebView? = null
+
     private var running = false
     private var collected = 0
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var previousFrame: Bitmap? = null
+    private var scanCount = 0
+
+    private val scanTask = object : Runnable {
+        override fun run() {
+
+            if (!running) return
+
+            analyzeScreen()
+
+            handler.postDelayed(this, 3000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,24 +60,23 @@ class MainActivity : Activity() {
         layout.addView(title)
 
         status = TextView(this)
-        status.text = "Zebrane: 0 | STOP"
         status.setPadding(10, 5, 10, 5)
         layout.addView(status)
 
         val buttons = LinearLayout(this)
 
         val startButton = Button(this)
-        startButton.text = "START"
+        startButton.text = "START ANALIZY"
+
         startButton.setOnClickListener {
-            running = true
-            updateStatus()
+            startAnalysis()
         }
 
         val stopButton = Button(this)
-        stopButton.text = "STOP"
+        stopButton.text = "STOP ANALIZY"
+
         stopButton.setOnClickListener {
-            running = false
-            updateStatus()
+            stopAnalysis()
         }
 
         buttons.addView(
@@ -69,8 +91,14 @@ class MainActivity : Activity() {
 
         layout.addView(buttons)
 
+        scanStatus = TextView(this)
+        scanStatus.text = "Analiza obrazu: wyłączona"
+        scanStatus.setPadding(10, 8, 10, 8)
+        layout.addView(scanStatus)
+
         val addButton = Button(this)
-        addButton.text = "DODAJ SUROWIEC"
+        addButton.text = "DODAJ ZEBRANY SUROWIEC"
+
         addButton.setOnClickListener {
             collected++
             updateStatus()
@@ -80,6 +108,7 @@ class MainActivity : Activity() {
 
         val backButton = Button(this)
         backButton.text = "POWRÓT DO GRY"
+
         backButton.setOnClickListener {
             showMainPage()
         }
@@ -110,7 +139,170 @@ class MainActivity : Activity() {
 
         setContentView(layout)
 
+        updateStatus()
+
         webView.loadUrl("https://www.warofdragons.com/")
+    }
+
+    private fun startAnalysis() {
+
+        if (running) return
+
+        running = true
+        scanCount = 0
+
+        previousFrame?.recycle()
+        previousFrame = null
+
+        scanStatus.text = "Uruchomiono analizę obrazu co 3 sekundy."
+
+        handler.removeCallbacks(scanTask)
+        handler.post(scanTask)
+
+        updateStatus()
+    }
+
+    private fun stopAnalysis() {
+
+        running = false
+
+        handler.removeCallbacks(scanTask)
+
+        scanStatus.text = "Analiza obrazu zatrzymana."
+
+        updateStatus()
+    }
+
+    private fun analyzeScreen() {
+
+        val activeView = getActiveWebView()
+
+        if (activeView.width <= 0 ||
+            activeView.height <= 0
+        ) {
+            scanStatus.text = "Oczekiwanie na ekran gry..."
+            return
+        }
+
+        try {
+
+            val bitmap = Bitmap.createBitmap(
+                activeView.width,
+                activeView.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            val canvas = Canvas(bitmap)
+            activeView.draw(canvas)
+
+            val currentFrame = Bitmap.createScaledBitmap(
+                bitmap,
+                64,
+                64,
+                true
+            )
+
+            bitmap.recycle()
+
+            scanCount++
+
+            val oldFrame = previousFrame
+
+            if (oldFrame == null) {
+
+                scanStatus.text =
+                    "Pierwszy obraz zapisany. Skan: $scanCount"
+
+            } else {
+
+                val difference = compareFrames(
+                    oldFrame,
+                    currentFrame
+                )
+
+                if (difference > 5) {
+
+                    scanStatus.text =
+                        "Wykryto zmianę obrazu: " +
+                        "$difference% | Skan: $scanCount"
+
+                } else {
+
+                    scanStatus.text =
+                        "Ekran bez większych zmian | " +
+                        "Skan: $scanCount"
+                }
+
+                oldFrame.recycle()
+            }
+
+            previousFrame = currentFrame
+
+        } catch (error: Exception) {
+
+            scanStatus.text =
+                "Błąd analizy: ${error.message}"
+        }
+    }
+
+    private fun compareFrames(
+        oldFrame: Bitmap,
+        newFrame: Bitmap
+    ): Int {
+
+        var changedPixels = 0
+        val totalPixels = 64 * 64
+
+        for (y in 0 until 64 step 2) {
+
+            for (x in 0 until 64 step 2) {
+
+                val oldColor = oldFrame.getPixel(x, y)
+                val newColor = newFrame.getPixel(x, y)
+
+                val redDifference =
+                    kotlin.math.abs(
+                        android.graphics.Color.red(oldColor) -
+                        android.graphics.Color.red(newColor)
+                    )
+
+                val greenDifference =
+                    kotlin.math.abs(
+                        android.graphics.Color.green(oldColor) -
+                        android.graphics.Color.green(newColor)
+                    )
+
+                val blueDifference =
+                    kotlin.math.abs(
+                        android.graphics.Color.blue(oldColor) -
+                        android.graphics.Color.blue(newColor)
+                    )
+
+                val difference =
+                    redDifference +
+                    greenDifference +
+                    blueDifference
+
+                if (difference > 100) {
+                    changedPixels++
+                }
+            }
+        }
+
+        return (changedPixels * 4 * 100) / totalPixels
+    }
+
+    private fun getActiveWebView(): WebView {
+
+        val popup = popupWebView
+
+        if (popup != null &&
+            popup.visibility == View.VISIBLE
+        ) {
+            return popup
+        }
+
+        return webView
     }
 
     private fun configureWebView(view: WebView) {
@@ -170,10 +362,8 @@ class MainActivity : Activity() {
 
     private fun createPopup(resultMsg: Message): Boolean {
 
-        val oldPopup = popupWebView
-
-        if (oldPopup != null) {
-            closePopup(oldPopup)
+        popupWebView?.let {
+            closePopup(it)
         }
 
         val popup = WebView(this)
@@ -218,8 +408,8 @@ class MainActivity : Activity() {
         val popup = popupWebView
 
         if (popup != null) {
-            popup.visibility = android.view.View.GONE
-            webView.visibility = android.view.View.VISIBLE
+            popup.visibility = View.GONE
+            webView.visibility = View.VISIBLE
             webView.bringToFront()
         }
     }
@@ -227,8 +417,8 @@ class MainActivity : Activity() {
     private fun updateStatus() {
 
         status.text =
-            "Zebrane: $collected | Status: " +
-            if (running) "START" else "STOP"
+            "Zebrane: $collected | Analiza: " +
+            if (running) "AKTYWNA" else "WYŁĄCZONA"
     }
 
     @Suppress("DEPRECATION")
@@ -237,7 +427,7 @@ class MainActivity : Activity() {
         val popup = popupWebView
 
         if (popup != null &&
-            popup.visibility == android.view.View.VISIBLE
+            popup.visibility == View.VISIBLE
         ) {
 
             if (popup.canGoBack()) {
@@ -254,6 +444,10 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+
+        stopAnalysis()
+
+        previousFrame?.recycle()
 
         popupWebView?.destroy()
         webView.destroy()
