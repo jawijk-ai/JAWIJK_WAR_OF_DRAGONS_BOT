@@ -41,21 +41,22 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private var scanInterval = 30000L
+    private val basicFish = mutableListOf<FishResource>()
+    private val mystrasFish = mutableListOf<FishResource>()
+
     private var analysisRunning = false
     private var scanInProgress = false
+    private var scanInterval = 30000L
 
     private var selectedCategory = "Ryby podstawowe"
     private var selectedFish = ""
 
-    private val fishList = mutableListOf<FishResource>()
+    private var basicLoaded = false
+    private var mystrasLoaded = false
 
     private val scanRunnable = object : Runnable {
         override fun run() {
-
-            if (!analysisRunning) return
-            if (scanInProgress) return
-
+            if (!analysisRunning || scanInProgress) return
             scanPage()
         }
     }
@@ -67,28 +68,24 @@ class MainActivity : Activity() {
 
         createInterface()
         configureWebView()
+        loadBasicCatalog()
 
-        loadFishCatalog()
-
-        gameWebView.loadUrl(
-            "https://www.warofdragons.com/"
-        )
+        gameWebView.loadUrl("https://www.warofdragons.com/")
     }
 
     private fun createInterface() {
 
-        val mainLayout = LinearLayout(this)
-        mainLayout.orientation = LinearLayout.VERTICAL
-        mainLayout.setBackgroundColor(Color.rgb(25, 25, 25))
+        val layout = LinearLayout(this)
+        layout.orientation = LinearLayout.VERTICAL
+        layout.setBackgroundColor(Color.rgb(25, 25, 25))
 
         val title = TextView(this)
         title.text = "JAWIJK WOD BOT"
         title.textSize = 21f
         title.setTextColor(Color.WHITE)
-        title.setPadding(10, 12, 10, 12)
         title.gravity = android.view.Gravity.CENTER
-
-        mainLayout.addView(title)
+        title.setPadding(10, 12, 10, 12)
+        layout.addView(title)
 
         categorySpinner = Spinner(this)
 
@@ -121,10 +118,10 @@ class MainActivity : Activity() {
                 ) {}
             }
 
-        mainLayout.addView(categorySpinner)
+        layout.addView(categorySpinner)
 
         fishSpinner = Spinner(this)
-        mainLayout.addView(fishSpinner)
+        layout.addView(fishSpinner)
 
         timeSpinner = Spinner(this)
 
@@ -156,24 +153,12 @@ class MainActivity : Activity() {
                     position: Int,
                     id: Long
                 ) {
-
-                    val values = longArrayOf(
-                        1000L,
-                        5000L,
-                        10000L,
-                        15000L,
-                        30000L,
-                        60000L,
-                        120000L,
-                        300000L
+                    val intervals = longArrayOf(
+                        1000L, 5000L, 10000L, 15000L,
+                        30000L, 60000L, 120000L, 300000L
                     )
 
-                    scanInterval = values[position]
-
-                    if (::scanStatus.isInitialized) {
-                        scanStatus.text =
-                            "Odstęp analizy: ${times[position]}"
-                    }
+                    scanInterval = intervals[position]
 
                     if (analysisRunning && !scanInProgress) {
                         handler.removeCallbacks(scanRunnable)
@@ -186,7 +171,7 @@ class MainActivity : Activity() {
                 ) {}
             }
 
-        mainLayout.addView(timeSpinner)
+        layout.addView(timeSpinner)
 
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
@@ -215,16 +200,16 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        mainLayout.addView(buttons)
+        layout.addView(buttons)
 
         scanStatus = TextView(this)
-        scanStatus.text = "Oczekiwanie na skanowanie..."
+        scanStatus.text = "Pobieranie biblioteki..."
         scanStatus.textSize = 13f
         scanStatus.setTextColor(Color.GREEN)
         scanStatus.setPadding(10, 8, 10, 8)
         scanStatus.setTextIsSelectable(true)
 
-        mainLayout.addView(scanStatus)
+        layout.addView(scanStatus)
 
         val zoomButtons = LinearLayout(this)
         zoomButtons.orientation = LinearLayout.HORIZONTAL
@@ -253,10 +238,9 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        mainLayout.addView(zoomButtons)
+        layout.addView(zoomButtons)
 
         gameFrame = FrameLayout(this)
-
         gameWebView = WebView(this)
 
         gameFrame.addView(
@@ -267,7 +251,7 @@ class MainActivity : Activity() {
             )
         )
 
-        mainLayout.addView(
+        layout.addView(
             gameFrame,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -279,12 +263,12 @@ class MainActivity : Activity() {
         catalogView = WebView(this)
         catalogView.visibility = View.GONE
 
-        mainLayout.addView(
+        layout.addView(
             catalogView,
             LinearLayout.LayoutParams(1, 1)
         )
 
-        setContentView(mainLayout)
+        setContentView(layout)
     }
         private fun configureWebView() {
 
@@ -293,45 +277,15 @@ class MainActivity : Activity() {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
-
         settings.loadsImagesAutomatically = true
         settings.javaScriptCanOpenWindowsAutomatically = true
         settings.setSupportMultipleWindows(true)
-
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
-
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
 
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
-        settings.allowFileAccess = true
-        settings.allowContentAccess = true
-
-        gameWebView.isFocusable = true
-        gameWebView.isFocusableInTouchMode = true
-        gameWebView.isClickable = true
-
-        gameWebView.setBackgroundColor(Color.BLACK)
-
-        gameWebView.webViewClient = object : WebViewClient() {
-
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageFinished(view, url)
-                scanStatus.text = "Strona gry załadowana."
-            }
-
-            override fun shouldOverrideUrlLoading(
-                view: WebView?,
-                url: String?
-            ): Boolean {
-                return false
-            }
-        }
-
+        gameWebView.webViewClient = WebViewClient()
         gameWebView.webChromeClient = createGameChromeClient()
     }
 
@@ -346,35 +300,25 @@ class MainActivity : Activity() {
                 resultMsg: Message?
             ): Boolean {
 
-                if (popupWebView != null) {
-                    closePopup()
-                }
+                closePopup()
 
                 val popup = WebView(this@MainActivity)
 
                 popup.settings.javaScriptEnabled = true
                 popup.settings.domStorageEnabled = true
                 popup.settings.databaseEnabled = true
-                popup.settings.loadsImagesAutomatically = true
                 popup.settings.javaScriptCanOpenWindowsAutomatically = true
                 popup.settings.setSupportMultipleWindows(true)
 
                 popup.settings.useWideViewPort = true
                 popup.settings.loadWithOverviewMode = true
-
                 popup.settings.builtInZoomControls = true
                 popup.settings.displayZoomControls = false
-
-                popup.isFocusable = true
-                popup.isFocusableInTouchMode = true
-                popup.isClickable = true
 
                 popup.webViewClient = WebViewClient()
                 popup.webChromeClient = createGameChromeClient()
 
                 val container = FrameLayout(this@MainActivity)
-
-                container.setBackgroundColor(Color.WHITE)
 
                 container.addView(
                     popup,
@@ -387,16 +331,16 @@ class MainActivity : Activity() {
                 val closeButton = Button(this@MainActivity)
                 closeButton.text = "ZAMKNIJ"
 
-                val closeParams = FrameLayout.LayoutParams(
+                val params = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
 
-                closeParams.gravity =
+                params.gravity =
                     android.view.Gravity.TOP or
                     android.view.Gravity.END
 
-                container.addView(closeButton, closeParams)
+                container.addView(closeButton, params)
 
                 closeButton.setOnClickListener {
                     closePopup()
@@ -409,8 +353,6 @@ class MainActivity : Activity() {
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                 )
-
-                container.bringToFront()
 
                 popupWebView = popup
                 popupContainer = container
@@ -446,20 +388,22 @@ class MainActivity : Activity() {
         try {
             popup?.stopLoading()
             popup?.destroy()
-        } catch (e: Exception) {
-        }
+        } catch (_: Exception) {}
 
         try {
             if (container != null) {
                 gameFrame.removeView(container)
             }
-        } catch (e: Exception) {
-        }
+        } catch (_: Exception) {}
     }
 
-    private fun loadFishCatalog() {
+    // -----------------------------------------
+    // BIBLIOTEKA PODSTAWOWA
+    // -----------------------------------------
 
-        scanStatus.text = "Pobieranie biblioteki ryb..."
+    private fun loadBasicCatalog() {
+
+        scanStatus.text = "Pobieranie ryb podstawowych..."
 
         catalogView.settings.javaScriptEnabled = true
         catalogView.settings.domStorageEnabled = true
@@ -470,8 +414,9 @@ class MainActivity : Activity() {
                 view: WebView?,
                 url: String?
             ) {
-                super.onPageFinished(view, url)
-                readFishCatalog()
+                if (url?.contains("id=351") == true) {
+                    extractBasicFish()
+                }
             }
         }
 
@@ -480,91 +425,116 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun readFishCatalog() {
+    private fun extractBasicFish() {
 
         val js = """
             (function() {
 
-                let result = [];
+                let output = [];
                 let seen = new Set();
 
-                let excluded = [
-                    "home",
-                    "forum",
-                    "login",
-                    "register",
-                    "search",
-                    "next",
-                    "previous",
-                    "back",
-                    "library",
-                    "fisherman",
-                    "fishing",
-                    "fish resources"
-                ];
-
-                function addName(value) {
-
-                    if (!value) return;
-
-                    let name = value
+                function clean(value) {
+                    return (value || "")
                         .replace(/\s+/g, " ")
                         .trim();
+                }
 
-                    if (name.length < 3 || name.length > 90) {
-                        return;
-                    }
+                function add(value, detail) {
 
-                    let lower = name.toLowerCase();
+                    let name = clean(value);
 
-                    if (excluded.some(x => lower === x)) {
-                        return;
-                    }
+                    if (!name) return;
+                    if (name.length < 3 || name.length > 70) return;
 
-                    if (seen.has(lower)) return;
+                    let low = name.toLowerCase();
 
-                    seen.add(lower);
+                    if (seen.has(low)) return;
 
-                    result.push({
+                    let forbidden = [
+                        "image",
+                        "fisherman",
+                        "skill level",
+                        "magmar",
+                        "human locations",
+                        "locations",
+                        "fish"
+                    ];
+
+                    if (forbidden.includes(low)) return;
+
+                    seen.add(low);
+
+                    output.push({
                         name: name,
-                        details: name
+                        details: detail || ""
                     });
                 }
 
-                let links = document.querySelectorAll("a");
+                let tables = document.querySelectorAll("table");
 
-                links.forEach(function(a) {
+                tables.forEach(function(table) {
 
-                    let text = (
-                        a.innerText ||
-                        a.textContent ||
-                        ""
-                    ).trim();
+                    let tableText =
+                        (table.innerText || "").toLowerCase();
 
-                    let title = (
-                        a.getAttribute("title") ||
-                        ""
-                    ).trim();
-
-                    let image = a.querySelector("img");
-
-                    let imageName = "";
-
-                    if (image) {
-                        imageName =
-                            image.getAttribute("alt") ||
-                            image.getAttribute("title") ||
-                            "";
+                    if (
+                        !tableText.includes("skill level") ||
+                        !tableText.includes("magmar") ||
+                        !tableText.includes("human locations")
+                    ) {
+                        return;
                     }
 
-                    let name = text || title || imageName;
+                    let rows = table.querySelectorAll("tr");
 
-                    if (name) {
-                        addName(name);
-                    }
+                    rows.forEach(function(row) {
+
+                        let cells = row.querySelectorAll("td, th");
+
+                        if (cells.length < 2) return;
+
+                        let firstCell = clean(cells[0].innerText);
+
+                        if (!/^[0-9]+$/.test(firstCell)) return;
+
+                        let fishCell = cells[1];
+
+                        let candidates = [];
+
+                        fishCell.querySelectorAll("a").forEach(function(a) {
+
+                            let text = clean(a.innerText || a.textContent);
+                            let title = clean(a.getAttribute("title"));
+
+                            if (text) candidates.push(text);
+                            if (title) candidates.push(title);
+
+                            a.querySelectorAll("img").forEach(function(img) {
+
+                                let alt = clean(img.getAttribute("alt"));
+                                let imgTitle = clean(img.getAttribute("title"));
+
+                                if (alt) candidates.push(alt);
+                                if (imgTitle) candidates.push(imgTitle);
+                            });
+                        });
+
+                        fishCell.querySelectorAll("img").forEach(function(img) {
+
+                            let alt = clean(img.getAttribute("alt"));
+                            let title = clean(img.getAttribute("title"));
+
+                            if (alt) candidates.push(alt);
+                            if (title) candidates.push(title);
+                        });
+
+                        candidates.forEach(function(name) {
+                            add(name, "Poziom umiejętności: " + firstCell);
+                        });
+                    });
                 });
 
-                return JSON.stringify(result);
+                return JSON.stringify(output);
 
             })();
         """
@@ -578,78 +548,287 @@ class MainActivity : Activity() {
 
                 val array = JSONArray(decoded)
 
-                fishList.clear()
-
-                val uniqueNames = mutableSetOf<String>()
+                basicFish.clear()
 
                 for (i in 0 until array.length()) {
 
                     val item = array.getJSONObject(i)
 
-                    val name =
-                        item.optString("name", "").trim()
+                    basicFish.add(
+                        FishResource(
+                            item.optString("name"),
+                            item.optString("details")
+                        )
+                    )
+                }
 
-                    val details =
-                        item.optString("details", "").trim()
+                basicLoaded = true
+
+                loadMystrasCatalog()
+
+            } catch (e: Exception) {
+
+                basicFish.clear()
+                basicLoaded = true
+
+                scanStatus.text =
+                    "Błąd ryb podstawowych: ${e.message}"
+
+                loadMystrasCatalog()
+            }
+        }
+    }
+
+    // -----------------------------------------
+    // BIBLIOTEKA MYSTRAS
+    // -----------------------------------------
+
+    private fun loadMystrasCatalog() {
+
+        scanStatus.text = "Pobieranie danych Mystras..."
+
+        catalogView.loadUrl(
+            "https://warofdragons.com/info/library/index.php?id=470&obj=cat"
+        )
+
+        catalogView.webViewClient = object : WebViewClient() {
+
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
+            ) {
+                if (url?.contains("id=470") == true) {
+                    extractMystrasFish()
+                }
+            }
+        }
+    }
+
+    private fun extractMystrasFish() {
+
+        val js = """
+            (function() {
+
+                let output = [];
+                let seen = new Set();
+
+                function clean(value) {
+                    return (value || "")
+                        .replace(/\s+/g, " ")
+                        .trim();
+                }
+
+                function add(value) {
+
+                    let name = clean(value);
+
+                    if (!name) return;
+                    if (name.length < 3 || name.length > 70) return;
+
+                    let low = name.toLowerCase();
+
+                    if (seen.has(low)) return;
+
+                    let forbidden = [
+                        "image",
+                        "fisherman",
+                        "herbologist",
+                        "geologist",
+                        "profession",
+                        "resource",
+                        "effect",
+                        "price",
+                        "skill"
+                    ];
+
+                    if (forbidden.includes(low)) return;
+
+                    seen.add(low);
+
+                    output.push({
+                        name: name,
+                        details: "Mystras - Fisherman"
+                    });
+                }
+
+                let tables = document.querySelectorAll("table");
+
+                tables.forEach(function(table) {
+
+                    let text =
+                        (table.innerText || "").toLowerCase();
 
                     if (
-                        name.isNotEmpty() &&
-                        uniqueNames.add(name.lowercase())
+                        !text.includes("profession") ||
+                        !text.includes("fisherman")
                     ) {
-                        fishList.add(
-                            FishResource(
-                                name = name,
-                                details = details
-                            )
+                        return;
+                    }
+
+                    table.querySelectorAll("tr").forEach(function(row) {
+
+                        let rowText =
+                            clean(row.innerText).toLowerCase();
+
+                        if (!rowText.includes("fisherman")) return;
+
+                        let cells = row.querySelectorAll("td");
+
+                        if (cells.length < 2) return;
+
+                        // Kolumna Resource jest zwykle trzecią kolumną.
+                        let resourceCell = cells.length >= 3
+                            ? cells[2]
+                            : cells[cells.length - 1];
+
+                        resourceCell.querySelectorAll("a").forEach(function(a) {
+
+                            let title = clean(a.getAttribute("title"));
+                            let text = clean(a.innerText || a.textContent);
+
+                            if (title) add(title);
+                            if (text) add(text);
+
+                            a.querySelectorAll("img").forEach(function(img) {
+
+                                let alt = clean(img.getAttribute("alt"));
+                                let imgTitle = clean(img.getAttribute("title"));
+
+                                if (alt) add(alt);
+                                if (imgTitle) add(imgTitle);
+                            });
+                        });
+
+                        resourceCell.querySelectorAll("img").forEach(function(img) {
+
+                            let alt = clean(img.getAttribute("alt"));
+                            let title = clean(img.getAttribute("title"));
+
+                            if (alt) add(alt);
+                            if (title) add(title);
+                        });
+                    });
+                });
+
+                return JSON.stringify(output);
+
+            })();
+        """
+
+        catalogView.evaluateJavascript(js) { result ->
+
+            try {
+
+                val decoded =
+                    JSONArray("[$result]").getString(0)
+
+                val array = JSONArray(decoded)
+
+                mystrasFish.clear()
+
+                for (i in 0 until array.length()) {
+
+                    val item = array.getJSONObject(i)
+
+                    mystrasFish.add(
+                        FishResource(
+                            item.optString("name"),
+                            item.optString("details")
+                        )
+                    )
+                }
+
+                // Znana nazwa ryby Mystras z oficjalnego opisu.
+                if (mystrasFish.none {
+                        it.name.equals(
+                            "Mystras Serpentfish",
+                            ignoreCase = true
                         )
                     }
+                ) {
+                    mystrasFish.add(
+                        FishResource(
+                            "Mystras Serpentfish",
+                            "Mystras - Fisherman"
+                        )
+                    )
                 }
+
+                mystrasLoaded = true
 
                 showFishList()
 
                 scanStatus.text =
-                    "Biblioteka: ${fishList.size} pozycji."
+                    "Biblioteka pobrana. Podstawowe: ${basicFish.size}, Mystras: ${mystrasFish.size}"
 
             } catch (e: Exception) {
 
+                mystrasFish.clear()
+
+                mystrasFish.add(
+                    FishResource(
+                        "Mystras Serpentfish",
+                        "Mystras - Fisherman"
+                    )
+                )
+
+                mystrasLoaded = true
+                showFishList()
+
                 scanStatus.text =
-                    "Błąd biblioteki: ${e.message}"
+                    "Mystras: pobrano tylko potwierdzoną nazwę. ${e.message}"
             }
         }
     }
+        private fun loadMystrasCatalog() {
+
+        scanStatus.text = "Pobieranie danych Mystras..."
+
+        catalogView.webViewClient = object : WebViewClient() {
+
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
+            ) {
+                if (url?.contains("id=470") == true) {
+                    extractMystrasFish()
+                }
+            }
+        }
+
+        catalogView.loadUrl(
+            "https://warofdragons.com/info/library/index.php?id=470&obj=cat"
+        )
+        }
+           // -----------------------------------------
+    // WYBÓR RYB
+    // -----------------------------------------
 
     private fun showFishList() {
 
         if (!::fishSpinner.isInitialized) return
 
-        val filtered = if (
+        val source = if (
             selectedCategory == "Ryby Mystras"
         ) {
-
-            fishList.filter {
-                it.name.contains("Mystras", ignoreCase = true)
-            }
-
+            mystrasFish
         } else {
-
-            fishList.filter {
-                !it.name.contains("Mystras", ignoreCase = true)
-            }
+            basicFish
         }
 
-        val names = if (filtered.isEmpty()) {
-            listOf("Brak pozycji w tej kategorii")
+        val names = source.map { it.name }.distinct()
+
+        val displayNames = if (names.isEmpty()) {
+            listOf("Brak rozpoznanych pozycji")
         } else {
-            filtered.map { it.name }
+            names
         }
 
-        val adapter = ArrayAdapter(
+        fishSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            names
+            displayNames
         )
-
-        fishSpinner.adapter = adapter
 
         fishSpinner.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
@@ -661,17 +840,15 @@ class MainActivity : Activity() {
                     id: Long
                 ) {
 
-                    if (filtered.isNotEmpty()) {
+                    selectedFish =
+                        if (names.isNotEmpty()) names[position] else ""
 
-                        selectedFish = filtered[position].name
-
-                        scanStatus.text =
+                    scanStatus.text =
+                        if (selectedFish.isNotEmpty()) {
                             "Wybrany surowiec: $selectedFish"
-
-                    } else {
-
-                        selectedFish = ""
-                    }
+                        } else {
+                            "Brak surowców w tej kategorii."
+                        }
                 }
 
                 override fun onNothingSelected(
@@ -680,6 +857,10 @@ class MainActivity : Activity() {
             }
     }
 
+    // -----------------------------------------
+    // START / STOP
+    // -----------------------------------------
+
     private fun startAnalysis() {
 
         if (analysisRunning) return
@@ -687,8 +868,7 @@ class MainActivity : Activity() {
         analysisRunning = true
         scanInProgress = false
 
-        scanStatus.text =
-            "Analiza uruchomiona. Jeden obrazek na skan."
+        scanStatus.text = "Analiza uruchomiona."
 
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
@@ -705,9 +885,14 @@ class MainActivity : Activity() {
 
         scanStatus.text = "Analiza zatrzymana."
     }
-        private fun scanPage() {
 
-        if (scanInProgress) return
+    // -----------------------------------------
+    // SKANOWANIE JEDNEGO OBRAZKA
+    // -----------------------------------------
+
+    private fun scanPage() {
+
+        if (!analysisRunning || scanInProgress) return
 
         scanInProgress = true
 
@@ -722,9 +907,7 @@ class MainActivity : Activity() {
 
                     try {
 
-                        let imgs = doc.querySelectorAll("img");
-
-                        imgs.forEach(function(img) {
+                        doc.querySelectorAll("img").forEach(function(img) {
 
                             if (
                                 img.complete &&
@@ -734,10 +917,7 @@ class MainActivity : Activity() {
 
                                 let r = img.getBoundingClientRect();
 
-                                if (
-                                    r.width > 5 &&
-                                    r.height > 5
-                                ) {
+                                if (r.width > 5 && r.height > 5) {
                                     images.push(img);
                                 }
                             }
@@ -746,10 +926,7 @@ class MainActivity : Activity() {
                         canvases +=
                             doc.querySelectorAll("canvas").length;
 
-                        let iframeList =
-                            doc.querySelectorAll("iframe");
-
-                        iframeList.forEach(function(frame) {
+                        doc.querySelectorAll("iframe").forEach(function(frame) {
 
                             frames++;
 
@@ -766,7 +943,6 @@ class MainActivity : Activity() {
                 search(document);
 
                 if (images.length === 0) {
-
                     return JSON.stringify({
                         count: 0,
                         canvases: canvases,
@@ -775,7 +951,13 @@ class MainActivity : Activity() {
                     });
                 }
 
-                // Losujemy dokładnie JEDEN obrazek.
+                // Usuwamy poprzednie oznaczenie.
+                images.forEach(function(img) {
+                    img.style.removeProperty("outline");
+                    img.style.removeProperty("box-shadow");
+                });
+
+                // Wybieramy dokładnie jeden obraz.
                 let index = Math.floor(
                     Math.random() * images.length
                 );
@@ -784,14 +966,6 @@ class MainActivity : Activity() {
 
                 let oldOutline = img.style.outline;
                 let oldShadow = img.style.boxShadow;
-
-                try {
-                    img.scrollIntoView({
-                        behavior: "smooth",
-                        block: "center",
-                        inline: "center"
-                    });
-                } catch(e) {}
 
                 function flash() {
 
@@ -809,15 +983,12 @@ class MainActivity : Activity() {
                 }
 
                 function clear() {
-
                     img.style.outline = oldOutline;
                     img.style.boxShadow = oldShadow;
                 }
 
-                // Pierwsze oznaczenie.
                 flash();
 
-                // Drugie oznaczenie.
                 setTimeout(function() {
                     clear();
                     flash();
@@ -843,10 +1014,7 @@ class MainActivity : Activity() {
             try {
 
                 if (result == null || result == "null") {
-
-                    scanStatus.text =
-                        "Brak odpowiedzi skanera."
-
+                    scanStatus.text = "Brak odpowiedzi skanera."
                 } else {
 
                     val decoded =
@@ -859,30 +1027,28 @@ class MainActivity : Activity() {
                     val frames = data.optInt("frames")
                     val marked = data.optBoolean("marked")
 
-                    if (marked) {
+                    scanStatus.text = if (marked) {
 
-                        scanStatus.text =
-                            "JEDEN OBRAZEK OZNACZONY DWUKROTNIE\n" +
-                            "Wszystkie znalezione: $count\n" +
-                            "Oznaczony numer: ${data.optInt("selected")}\n" +
-                            "Canvas: $canvases\n" +
-                            "Ramki: $frames\n" +
-                            "Surowiec wybrany: $selectedFish"
+                        "OZNACZONO JEDEN OBRAZEK DWUKROTNIE\n" +
+                        "Obrazki na stronie: $count\n" +
+                        "Oznaczony numer: ${data.optInt("selected")}\n" +
+                        "Canvas: $canvases\n" +
+                        "Ramki: $frames\n" +
+                        "Wybrany surowiec: $selectedFish"
 
                     } else {
 
-                        scanStatus.text =
-                            "Nie znaleziono obrazków.\n" +
-                            "Canvas: $canvases\n" +
-                            "Ramki: $frames\n" +
-                            "Wybrany surowiec: $selectedFish"
+                        "Nie znaleziono obrazków.\n" +
+                        "Canvas: $canvases\n" +
+                        "Ramki: $frames\n" +
+                        "Wybrany surowiec: $selectedFish"
                     }
                 }
 
             } catch (e: Exception) {
 
                 scanStatus.text =
-                    "Błąd analizy: ${e.message}"
+                    "Błąd skanowania: ${e.message}"
 
             } finally {
 
@@ -890,6 +1056,7 @@ class MainActivity : Activity() {
 
                 if (analysisRunning) {
                     handler.removeCallbacks(scanRunnable)
+
                     handler.postDelayed(
                         scanRunnable,
                         scanInterval
@@ -899,16 +1066,18 @@ class MainActivity : Activity() {
         }
     }
 
+    // -----------------------------------------
+    // CZYSZCZENIE OZNACZEŃ
+    // -----------------------------------------
+
     private fun clearHighlights() {
 
         val js = """
             (function() {
 
                 document.querySelectorAll("img").forEach(function(img) {
-
                     img.style.removeProperty("outline");
                     img.style.removeProperty("box-shadow");
-
                 });
 
                 return true;
@@ -919,6 +1088,10 @@ class MainActivity : Activity() {
         gameWebView.evaluateJavascript(js, null)
         popupWebView?.evaluateJavascript(js, null)
     }
+
+    // -----------------------------------------
+    // COFANIE
+    // -----------------------------------------
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
@@ -942,6 +1115,10 @@ class MainActivity : Activity() {
         }
     }
 
+    // -----------------------------------------
+    // ZAMYKANIE APLIKACJI
+    // -----------------------------------------
+
     override fun onDestroy() {
 
         analysisRunning = false
@@ -951,15 +1128,11 @@ class MainActivity : Activity() {
 
         closePopup()
 
-        if (::gameWebView.isInitialized) {
-            clearHighlights()
+        try {
             gameWebView.destroy()
-        }
-
-        if (::catalogView.isInitialized) {
             catalogView.destroy()
-        }
+        } catch (_: Exception) {}
 
         super.onDestroy()
     }
-}
+} 
