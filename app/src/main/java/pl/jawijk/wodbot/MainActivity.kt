@@ -45,6 +45,7 @@ class MainActivity : Activity() {
     private var scanCount = 0
 
     private val gameUrl = "https://www.warofdragons.com/"
+
     private val catalogUrl =
         "https://warofdragons.com/info/library/index.php?id=351&obj=cat"
 
@@ -53,7 +54,6 @@ class MainActivity : Activity() {
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (!scanning) return
-
             scanPage()
             handler.postDelayed(this, 30000)
         }
@@ -86,11 +86,6 @@ class MainActivity : Activity() {
 
         root.addView(title)
 
-        val categoryTitle = TextView(this)
-        categoryTitle.text = "WYBIERZ KATEGORIĘ RYB"
-        categoryTitle.setPadding(10, 5, 10, 5)
-        root.addView(categoryTitle)
-
         categorySpinner = Spinner(this)
 
         val categories = listOf(
@@ -106,58 +101,8 @@ class MainActivity : Activity() {
 
         root.addView(categorySpinner)
 
-        val resourceTitle = TextView(this)
-        resourceTitle.text = "WYBIERZ SUROWIEC"
-        resourceTitle.setPadding(10, 5, 10, 5)
-        root.addView(resourceTitle)
-
         resourceSpinner = Spinner(this)
         root.addView(resourceSpinner)
-
-        categorySpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-
-                override fun onNothingSelected(parent: AdapterView<*>?) {}
-
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                ) {
-                    if (position == 0) {
-                        showFishList(basicFish)
-                    } else {
-                        showFishList(mystrasFish)
-                    }
-                }
-            }
-
-        resourceSpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-
-                override fun onNothingSelected(parent: AdapterView<*>?) {}
-
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                ) {
-                    val list = if (categorySpinner.selectedItemPosition == 0) {
-                        basicFish
-                    } else {
-                        mystrasFish
-                    }
-
-                    selectedFish = list.getOrNull(position)
-
-                    selectedFish?.let {
-                        scanStatus.text =
-                            "Wybrano: ${it.name}\nPoziom umiejętności: ${it.skill}\nLokacje: ${it.locations}"
-                    }
-                }
-            }
 
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
@@ -210,14 +155,6 @@ class MainActivity : Activity() {
 
         root.addView(zoomButtons)
 
-        zoomOut.setOnClickListener {
-            gameWebView.zoomBy(0.8f)
-        }
-
-        zoomIn.setOnClickListener {
-            gameWebView.zoomBy(1.25f)
-        }
-
         scanStatus = TextView(this)
         scanStatus.text = "Ładowanie biblioteki rybaka..."
         scanStatus.textSize = 12f
@@ -249,9 +186,57 @@ class MainActivity : Activity() {
         )
 
         setContentView(root)
-    }
 
-    private fun configureWebView() {
+        zoomOut.setOnClickListener {
+            gameWebView.zoomBy(0.8f)
+        }
+
+        zoomIn.setOnClickListener {
+            gameWebView.zoomBy(1.25f)
+        }
+
+        categorySpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    if (position == 0) {
+                        showFishList(basicFish)
+                    } else {
+                        showFishList(mystrasFish)
+                    }
+                }
+            }
+
+        resourceSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    val list =
+                        if (categorySpinner.selectedItemPosition == 0) {
+                            basicFish
+                        } else {
+                            mystrasFish
+                        }
+
+                    selectedFish = list.getOrNull(position)
+                }
+            }
+    }
+        private fun configureWebView() {
 
         val settings = gameWebView.settings
 
@@ -290,7 +275,6 @@ class MainActivity : Activity() {
                 popup.settings.setSupportMultipleWindows(true)
 
                 popup.webViewClient = WebViewClient()
-
                 popup.webChromeClient = this
 
                 popupWebView = popup
@@ -332,9 +316,10 @@ class MainActivity : Activity() {
 
         catalogView.webViewClient = object : WebViewClient() {
 
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
+            ) {
                 readFishCatalog(catalogView)
             }
         }
@@ -347,22 +332,27 @@ class MainActivity : Activity() {
         val javascript = """
             (function() {
                 const result = [];
-
-                const tables = Array.from(document.querySelectorAll("table"));
+                const tables = Array.from(
+                    document.querySelectorAll("table")
+                );
 
                 let fishTable = null;
 
                 for (const table of tables) {
                     const headers = Array.from(
-                        table.querySelectorAll("tr:first-child th, tr:first-child td")
-                    ).map(e => (e.innerText || "").trim().toLowerCase());
+                        table.querySelectorAll(
+                            "tr:first-child th, tr:first-child td"
+                        )
+                    ).map(e =>
+                        (e.innerText || "").trim().toLowerCase()
+                    );
 
-                    const hasSkill = headers.some(x => x.includes("skill level"));
-                    const hasFish = headers.some(x => x === "fish");
-                    const hasMagmar = headers.some(x => x.includes("magmar"));
-                    const hasHuman = headers.some(x => x.includes("human"));
-
-                    if (hasSkill && hasFish && hasMagmar && hasHuman) {
+                    if (
+                        headers.some(x => x.includes("skill level")) &&
+                        headers.some(x => x === "fish") &&
+                        headers.some(x => x.includes("magmar")) &&
+                        headers.some(x => x.includes("human"))
+                    ) {
                         fishTable = table;
                         break;
                     }
@@ -370,65 +360,68 @@ class MainActivity : Activity() {
 
                 if (!fishTable) {
                     return JSON.stringify({
-                        error: "Nie znaleziono właściwej tabeli Fisherman resources",
+                        error: "Nie znaleziono tabeli Fisherman resources",
                         items: []
                     });
                 }
 
-                const rows = Array.from(fishTable.querySelectorAll("tr"));
+                const rows = Array.from(
+                    fishTable.querySelectorAll("tr")
+                );
 
                 for (const row of rows.slice(1)) {
-                    const cells = Array.from(row.querySelectorAll("td"));
+                    const cells = Array.from(
+                        row.querySelectorAll("td")
+                    );
 
                     if (cells.length < 4) continue;
 
                     const skill = (cells[0].innerText || "").trim();
 
-                    if (!skill || !Array.from(skill).every(
-                        ch => ch >= "0" && ch <= "9"
-                    )) {
-                        continue;
-                    }
+                    if (
+                        !skill ||
+                        !Array.from(skill).every(
+                            ch => ch >= "0" && ch <= "9"
+                        )
+                    ) continue;
 
                     const fishCell = cells[1];
-
                     const img = fishCell.querySelector("img");
-
                     const link = fishCell.querySelector("a");
 
                     let name = "";
 
                     if (img) {
-                        name = img.getAttribute("alt") ||
-                               img.getAttribute("title") || "";
+                        name =
+                            img.getAttribute("alt") ||
+                            img.getAttribute("title") ||
+                            "";
                     }
 
                     if (!name && link) {
-                        name = link.innerText || link.getAttribute("title") || "";
+                        name =
+                            link.innerText ||
+                            link.getAttribute("title") ||
+                            "";
                     }
 
                     if (!name && img) {
-                        const src = img.getAttribute("src") || "";
-                        name = src.split("/").pop().split("?")[0];
+                        name = img.src.split("/").pop();
                     }
 
                     if (!name) {
                         name = "Ryba – poziom " + skill;
                     }
 
-                    const image = img
-                        ? img.src
-                        : "";
-
-                    const magmar = (cells[2].innerText || "").trim();
-                    const human = (cells[3].innerText || "").trim();
-
                     result.push({
                         name: name,
                         skill: skill,
-                        locations: "Magmar: " + magmar +
-                                   " | Ludzie: " + human,
-                        image: image
+                        locations:
+                            "Magmar: " +
+                            (cells[2].innerText || "").trim() +
+                            " | Ludzie: " +
+                            (cells[3].innerText || "").trim(),
+                        image: img ? img.src : ""
                     });
                 }
 
@@ -447,43 +440,40 @@ class MainActivity : Activity() {
                     return@evaluateJavascript
                 }
 
-                val decodedString = JSONArray("[$result]").getString(0)
-                val json = JSONObject(decodedString)
+                val decoded = JSONArray("[$result]").getString(0)
+                val json = JSONObject(decoded)
 
-                val error = json.optString("error")
                 val items = json.optJSONArray("items")
 
                 basicFish.clear()
 
                 if (items != null) {
                     for (i in 0 until items.length()) {
-
                         val item = items.getJSONObject(i)
 
                         basicFish.add(
                             FishResource(
-                                name = item.optString("name"),
-                                skill = item.optString("skill"),
-                                locations = item.optString("locations"),
-                                image = item.optString("image")
+                                item.optString("name"),
+                                item.optString("skill"),
+                                item.optString("locations"),
+                                item.optString("image")
                             )
                         )
                     }
                 }
 
-                if (basicFish.isEmpty()) {
-                    scanStatus.text =
-                        "Nie pobrano ryb z biblioteki.\n$error"
-                } else {
-                    showFishList(basicFish)
+                showFishList(basicFish)
 
-                    scanStatus.text =
-                        "Pobrano ryby z biblioteki: ${basicFish.size}"
-                }
+                scanStatus.text =
+                    if (basicFish.isEmpty()) {
+                        "Nie pobrano ryb: ${json.optString("error")}"
+                    } else {
+                        "Pobrano ryby: ${basicFish.size}"
+                    }
 
             } catch (e: Exception) {
                 scanStatus.text =
-                    "Błąd odczytu biblioteki: ${e.message}"
+                    "Błąd biblioteki: ${e.message}"
             }
         }
     }
@@ -530,22 +520,15 @@ class MainActivity : Activity() {
             }
         }
 
-        val adapter = ArrayAdapter(
+        resourceSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
             names
         )
 
-        resourceSpinner.adapter = adapter
-
-        if (list.isNotEmpty()) {
-            selectedFish = list[0]
-        } else {
-            selectedFish = null
-        }
+        selectedFish = list.firstOrNull()
     }
-
-    private fun startAnalysis() {
+        private fun startAnalysis() {
 
         if (selectedFish == null) {
             scanStatus.text = "Najpierw wybierz surowiec."
@@ -558,19 +541,19 @@ class MainActivity : Activity() {
         startButton.isEnabled = false
         stopButton.isEnabled = true
 
+        handler.removeCallbacks(scanRunnable)
+
         scanStatus.text =
-            "ANALIZA URUCHOMIONA\nWybrano: ${selectedFish!!.name}"
+            "ANALIZA URUCHOMIONA: ${selectedFish!!.name}"
 
         scanPage()
 
-        handler.removeCallbacks(scanRunnable)
         handler.postDelayed(scanRunnable, 30000)
     }
 
     private fun stopAnalysis() {
 
         scanning = false
-
         handler.removeCallbacks(scanRunnable)
 
         startButton.isEnabled = true
@@ -579,7 +562,7 @@ class MainActivity : Activity() {
         clearHighlights()
 
         scanStatus.text =
-            "Analiza zatrzymana.\nWykonane skany: $scanCount"
+            "Analiza zatrzymana. Liczba skanów: $scanCount"
     }
 
     private fun scanPage() {
@@ -591,17 +574,19 @@ class MainActivity : Activity() {
 
         val javascript = """
             (function() {
-
                 const targetName = $targetName.toLowerCase();
                 const targetImage = $targetImage.toLowerCase();
 
                 const elements = Array.from(
                     document.querySelectorAll(
-                        "a, button, img, [role='button'], [title], [alt]"
+                        "a, button, img, svg, canvas, " +
+                        "[role='button'], [title], [alt]"
                     )
                 );
 
-                let found = [];
+                let found = 0;
+                let images = 0;
+                let canvases = 0;
 
                 for (const el of elements) {
 
@@ -613,61 +598,69 @@ class MainActivity : Activity() {
                         (el.getAttribute("href") || "")
                     ).toLowerCase();
 
-                    let match = false;
+                    if (el.tagName === "IMG") images++;
+                    if (el.tagName === "CANVAS") canvases++;
 
-                    if (targetName && text.includes(targetName)) {
-                        match = true;
-                    }
+                    const nameMatch =
+                        targetName.length > 0 &&
+                        text.includes(targetName);
 
-                    if (targetImage && targetImage.length > 0 &&
-                        text.includes(targetImage)) {
-                        match = true;
-                    }
+                    const imageMatch =
+                        targetImage.length > 0 &&
+                        text.includes(targetImage);
 
-                    if (match) {
-                        found.push(el);
+                    if (nameMatch || imageMatch) {
+                        found++;
+
+                        el.style.outline = "4px solid red";
+                        el.style.outlineOffset = "3px";
                     }
                 }
 
-                if (window.jawijkFlashTimer) {
-                    clearInterval(window.jawijkFlashTimer);
-                }
-
-                found.forEach(el => {
-                    el.dataset.jawijkOldOutline =
-                        el.style.outline || "";
-
-                    el.style.outline = "4px solid red";
-                    el.style.outlineOffset = "2px";
+                return JSON.stringify({
+                    found: found,
+                    images: images,
+                    canvases: canvases,
+                    title: document.title,
+                    url: location.href
                 });
-
-                let visible = true;
-
-                window.jawijkFlashTimer = setInterval(function() {
-                    visible = !visible;
-
-                    found.forEach(el => {
-                        el.style.outline = visible
-                            ? "4px solid red"
-                            : "none";
-                    });
-                }, 250);
-
-                return found.length;
             })();
         """.trimIndent()
 
-        gameWebView.evaluateJavascript(javascript) { result ->
+        fun scanWindow(webView: WebView, windowName: String) {
 
-            scanCount++
+            webView.evaluateJavascript(javascript) { result ->
 
-            val found = result?.toIntOrNull() ?: 0
+                try {
+                    if (result == null || result == "null") {
+                        return@evaluateJavascript
+                    }
 
-            scanStatus.text =
-                "ANALIZA: ${fish.name}\n" +
-                "Znalezione elementy: $found\n" +
-                "Liczba skanów: $scanCount\n" +
-                "Kolejny skan za 30 sekund."
+                    val decoded = JSONArray("[$result]").getString(0)
+                    val data = JSONObject(decoded)
+
+                    scanCount++
+
+                    scanStatus.text =
+                        "OKNO: $windowName\n" +
+                        "Gra: ${data.optString("title")}\n" +
+                        "Wybrany surowiec: ${fish.name}\n" +
+                        "Znalezione elementy: ${data.optInt("found")}\n" +
+                        "Obrazki: ${data.optInt("images")}\n" +
+                        "Canvas: ${data.optInt("canvases")}\n" +
+                        "Liczba skanów: $scanCount"
+
+                } catch (e: Exception) {
+                    scanStatus.text =
+                        "Błąd skanowania: ${e.message}"
+                }
+            }
+        }
+
+        scanWindow(gameWebView, "GŁÓWNE OKNO")
+
+        popupWebView?.let {
+            scanWindow(it, "DODATKOWE OKNO")
         }
     }
 
@@ -675,26 +668,21 @@ class MainActivity : Activity() {
 
         val javascript = """
             (function() {
-
-                if (window.jawijkFlashTimer) {
-                    clearInterval(window.jawijkFlashTimer);
-                }
-
                 document.querySelectorAll("*").forEach(el => {
-                    if (el.style.outline === "none" ||
-                        el.style.outline.includes("red")) {
+                    if (el.style.outline.includes("red")) {
                         el.style.outline = "";
                         el.style.outlineOffset = "";
                     }
                 });
-
             })();
         """.trimIndent()
 
         gameWebView.evaluateJavascript(javascript, null)
+        popupWebView?.evaluateJavascript(javascript, null)
     }
 
     override fun onBackPressed() {
+
         val popup = popupWebView
 
         if (popup != null && popup.canGoBack()) {
