@@ -1,4 +1,4 @@
-```kotlin
+kotlin
 package pl.jawijk.wodbot
 
 import android.app.Activity
@@ -155,7 +155,7 @@ class MainActivity : Activity() {
 
         webView.loadUrl("https://www.warofdragons.com/")
     }
-```kotlin
+kotlin
     private fun configureWebView() {
 
         val settings = webView.settings
