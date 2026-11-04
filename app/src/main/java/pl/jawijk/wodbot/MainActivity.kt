@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -13,6 +14,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import android.graphics.Color
+import android.graphics.Rect
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -25,6 +27,7 @@ class MainActivity : Activity() {
 
     private lateinit var gameWebView: WebView
     private lateinit var catalogView: WebView
+    private lateinit var gameFrame: FrameLayout
 
     private lateinit var scanStatus: TextView
     private lateinit var fishSpinner: Spinner
@@ -33,6 +36,9 @@ class MainActivity : Activity() {
 
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
+
+    private var popupWebView: WebView? = null
+    private var popupContainer: FrameLayout? = null
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -248,10 +254,20 @@ class MainActivity : Activity() {
 
         mainLayout.addView(zoomButtons)
 
+        gameFrame = FrameLayout(this)
+
         gameWebView = WebView(this)
 
-        mainLayout.addView(
+        gameFrame.addView(
             gameWebView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        mainLayout.addView(
+            gameFrame,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
@@ -279,9 +295,7 @@ class MainActivity : Activity() {
 
         settings.loadsImagesAutomatically = true
         settings.javaScriptCanOpenWindowsAutomatically = true
-
-        // Nie tworzymy niewidocznego okna popup.
-        settings.setSupportMultipleWindows(false)
+        settings.setSupportMultipleWindows(true)
 
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
@@ -297,12 +311,9 @@ class MainActivity : Activity() {
         gameWebView.isFocusable = true
         gameWebView.isFocusableInTouchMode = true
         gameWebView.isClickable = true
-        gameWebView.isLongClickable = true
 
         gameWebView.setBackgroundColor(Color.BLACK)
 
-        // Nie dodajemy OnTouchListener, który mógłby
-        // przechwytywać kliknięcia w grze.
         gameWebView.webViewClient = object : WebViewClient() {
 
             override fun onPageFinished(
@@ -311,7 +322,7 @@ class MainActivity : Activity() {
             ) {
                 super.onPageFinished(view, url)
 
-                scanStatus.text = "Strona gry załadowana."
+                scanStatus.text = "Strona załadowana."
             }
 
             override fun shouldOverrideUrlLoading(
@@ -322,7 +333,130 @@ class MainActivity : Activity() {
             }
         }
 
-        gameWebView.webChromeClient = WebChromeClient()
+        gameWebView.webChromeClient = createGameChromeClient()
+    }
+
+    private fun createGameChromeClient(): WebChromeClient {
+
+        return object : WebChromeClient() {
+
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?
+            ): Boolean {
+
+                if (popupWebView != null) {
+                    closePopup()
+                }
+
+                val popup = WebView(this@MainActivity)
+
+                popup.settings.javaScriptEnabled = true
+                popup.settings.domStorageEnabled = true
+                popup.settings.databaseEnabled = true
+                popup.settings.loadsImagesAutomatically = true
+                popup.settings.javaScriptCanOpenWindowsAutomatically = true
+                popup.settings.setSupportMultipleWindows(true)
+
+                popup.settings.useWideViewPort = true
+                popup.settings.loadWithOverviewMode = true
+
+                popup.settings.builtInZoomControls = true
+                popup.settings.displayZoomControls = false
+
+                popup.isFocusable = true
+                popup.isFocusableInTouchMode = true
+                popup.isClickable = true
+
+                popup.webViewClient = WebViewClient()
+
+                popup.webChromeClient = createGameChromeClient()
+
+                val container = FrameLayout(this@MainActivity)
+
+                container.setBackgroundColor(Color.WHITE)
+
+                container.addView(
+                    popup,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+
+                val closeButton = Button(this@MainActivity)
+                closeButton.text = "ZAMKNIJ"
+
+                val closeParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+
+                closeParams.gravity =
+                    android.view.Gravity.TOP or
+                    android.view.Gravity.END
+
+                container.addView(closeButton, closeParams)
+
+                closeButton.setOnClickListener {
+                    closePopup()
+                }
+
+                gameFrame.addView(
+                    container,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+
+                container.bringToFront()
+
+                popupWebView = popup
+                popupContainer = container
+
+                val transport =
+                    resultMsg?.obj as? WebView.WebViewTransport
+
+                if (transport == null) {
+                    closePopup()
+                    return false
+                }
+
+                transport.webView = popup
+                resultMsg.sendToTarget()
+
+                return true
+            }
+
+            override fun onCloseWindow(window: WebView?) {
+                closePopup()
+            }
+        }
+    }
+
+    private fun closePopup() {
+
+        val popup = popupWebView
+        val container = popupContainer
+
+        popupWebView = null
+        popupContainer = null
+
+        try {
+            popup?.stopLoading()
+            popup?.destroy()
+        } catch (e: Exception) {
+        }
+
+        try {
+            if (container != null) {
+                gameFrame.removeView(container)
+            }
+        } catch (e: Exception) {
+        }
     }
 
     private fun loadFishCatalog() {
@@ -461,36 +595,21 @@ class MainActivity : Activity() {
         ) {
 
             fishList.filter {
-                it.name.contains(
-                    "Mystras",
-                    ignoreCase = true
-                ) ||
-                it.details.contains(
-                    "Mystras",
-                    ignoreCase = true
-                )
+                it.name.contains("Mystras", ignoreCase = true) ||
+                it.details.contains("Mystras", ignoreCase = true)
             }
 
         } else {
 
             fishList.filter {
-                !it.name.contains(
-                    "Mystras",
-                    ignoreCase = true
-                ) &&
-                !it.details.contains(
-                    "Mystras",
-                    ignoreCase = true
-                )
+                !it.name.contains("Mystras", ignoreCase = true) &&
+                !it.details.contains("Mystras", ignoreCase = true)
             }
         }
 
         val names = if (filtered.isEmpty()) {
-
             listOf("Brak pozycji w tej kategorii")
-
         } else {
-
             filtered.map { it.name }
         }
 
@@ -599,11 +718,9 @@ class MainActivity : Activity() {
                             frames++;
 
                             try {
-
                                 if (frame.contentDocument) {
                                     search(frame.contentDocument);
                                 }
-
                             } catch(e) {}
                         });
 
@@ -629,13 +746,11 @@ class MainActivity : Activity() {
                 let img = images[index];
 
                 try {
-
                     img.scrollIntoView({
                         behavior: "smooth",
                         block: "center",
                         inline: "center"
                     });
-
                 } catch(e) {}
 
                 let oldOutline = img.style.outline;
@@ -757,17 +872,27 @@ class MainActivity : Activity() {
         """
 
         gameWebView.evaluateJavascript(js, null)
+        popupWebView?.evaluateJavascript(js, null)
     }
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
 
+        val popup = popupWebView
+
+        if (popup != null && popup.canGoBack()) {
+            popup.goBack()
+            return
+        }
+
+        if (popup != null) {
+            closePopup()
+            return
+        }
+
         if (gameWebView.canGoBack()) {
-
             gameWebView.goBack()
-
         } else {
-
             super.onBackPressed()
         }
     }
@@ -777,6 +902,8 @@ class MainActivity : Activity() {
         analysisRunning = false
 
         handler.removeCallbacks(scanRunnable)
+
+        closePopup()
 
         if (::gameWebView.isInitialized) {
             clearHighlights()
