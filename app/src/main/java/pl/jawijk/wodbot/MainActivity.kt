@@ -72,16 +72,8 @@ class MainActivity : Activity() {
             stopAnalysis()
         }
 
-        buttons.addView(
-            startButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
-        buttons.addView(
-            stopButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
+        buttons.addView(startButton, LinearLayout.LayoutParams(0, -2, 1f))
+        buttons.addView(stopButton, LinearLayout.LayoutParams(0, -2, 1f))
         layout.addView(buttons)
 
         val resultTitle = TextView(this)
@@ -255,7 +247,6 @@ class MainActivity : Activity() {
         """.trimIndent()
 
         activeView.evaluateJavascript(script) { result ->
-
             scanInProgress = false
 
             if (!running) return@evaluateJavascript
@@ -275,14 +266,8 @@ class MainActivity : Activity() {
                 val images = json.optJSONArray("images")
 
                 val output = StringBuilder()
-
-                output.append("SKAN: ")
-                    .append(scanCount)
-                    .append("\n")
-
-                output.append("WYKRYTE ELEMENTY: ")
-                    .append(total)
-                    .append("\n\n")
+                output.append("SKAN: ").append(scanCount).append("\n")
+                output.append("WYKRYTE ELEMENTY: ").append(total).append("\n\n")
 
                 if (images == null || images.length() == 0) {
                     output.append("Nie znaleziono obrazków ani ikon.")
@@ -290,20 +275,13 @@ class MainActivity : Activity() {
                     for (i in 0 until images.length()) {
                         val item = images.getJSONObject(i)
 
-                        output.append("ELEMENT ")
-                            .append(i + 1)
-                            .append("\n")
-
-                        output.append("Typ: ")
-                            .append(item.optString("type"))
-                            .append("\n")
-
+                        output.append("ELEMENT ").append(i + 1).append("\n")
+                        output.append("Typ: ").append(item.optString("type")).append("\n")
                         output.append("Rozmiar: ")
                             .append(item.optInt("width"))
                             .append(" x ")
                             .append(item.optInt("height"))
                             .append("\n")
-
                         output.append("Pozycja: ")
                             .append(item.optInt("x"))
                             .append(", ")
@@ -312,16 +290,12 @@ class MainActivity : Activity() {
 
                         val alt = item.optString("alt")
                         if (alt.isNotBlank()) {
-                            output.append("Opis: ")
-                                .append(alt)
-                                .append("\n")
+                            output.append("Opis: ").append(alt).append("\n")
                         }
 
                         val url = item.optString("url")
                         if (url.isNotBlank()) {
-                            output.append("Adres: ")
-                                .append(url)
-                                .append("\n")
+                            output.append("Adres: ").append(url).append("\n")
                         }
 
                         output.append("\n")
@@ -341,7 +315,6 @@ class MainActivity : Activity() {
 
     private fun getActiveWebView(): WebView {
         val popup = popupWebView
-
         return if (popup != null && popup.visibility == View.VISIBLE) {
             popup
         } else {
@@ -362,8 +335,7 @@ class MainActivity : Activity() {
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-            mixedContentMode =
-                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
 
         CookieManager.getInstance().apply {
@@ -375,9 +347,7 @@ class MainActivity : Activity() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: android.webkit.WebResourceRequest
-            ): Boolean {
-                return false
-            }
+            ): Boolean = false
         }
 
         view.webChromeClient = object : WebChromeClient() {
@@ -397,13 +367,10 @@ class MainActivity : Activity() {
     }
 
     private fun createPopup(resultMsg: Message): Boolean {
-        popupWebView?.let {
-            closePopup(it)
-        }
+        popupWebView?.let { closePopup(it) }
 
         val popup = WebView(this)
         popupWebView = popup
-
         configureWebView(popup)
 
         webContainer.addView(
@@ -416,9 +383,7 @@ class MainActivity : Activity() {
 
         popup.bringToFront()
 
-        val transport =
-            resultMsg.obj as WebView.WebViewTransport
-
+        val transport = resultMsg.obj as WebView.WebViewTransport
         transport.webView = popup
         resultMsg.sendToTarget()
 
@@ -438,18 +403,14 @@ class MainActivity : Activity() {
     }
 
     private fun showMainPage() {
-        popupWebView?.let {
-            it.visibility = View.GONE
-        }
-
+        popupWebView?.visibility = View.GONE
         webView.visibility = View.VISIBLE
         webView.bringToFront()
     }
 
     private fun updateStatus() {
-        status.text =
-            "Zebrane: $collected | Analiza: " +
-                if (running) "AKTYWNA" else "WYŁĄCZONA"
+        status.text = "Zebrane: $collected | Analiza: " +
+            if (running) "AKTYWNA" else "WYŁĄCZONA"
     }
 
     @Suppress("DEPRECATION")
