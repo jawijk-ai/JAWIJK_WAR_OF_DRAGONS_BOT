@@ -4,7 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.Message
+import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -13,80 +13,87 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import org.json.JSONObject
 import org.json.JSONArray
+import org.json.JSONObject
+
+data class FishResource(
+    val name: String,
+    val skill: String,
+    val locations: String,
+    val image: String
+)
 
 class MainActivity : Activity() {
 
-    data class FishResource(
-        val name: String,
-        val skill: String,
-        val locations: String,
-        val image: String
-    )
-
-    private lateinit var webView: WebView
-    private lateinit var catalogWebView: WebView
-    private lateinit var status: TextView
-    private lateinit var scanStatus: TextView
+    private lateinit var root: LinearLayout
     private lateinit var webContainer: FrameLayout
-    private lateinit var fishSpinner: Spinner
+    private lateinit var gameWebView: WebView
+
     private lateinit var categorySpinner: Spinner
-
-    private var popupWebView: WebView? = null
-
-    private var running = false
-    private var collected = 0
-    private var scanCount = 0
-
-    private val basicFish = mutableListOf<FishResource>()
-
-    private val mystrasFish = mutableListOf(
-        FishResource(
-            "Niebieska ikona w wodzie",
-            "-",
-            "Mystras",
-            ""
-        ),
-        FishResource(
-            "Żółta ikona w wodzie",
-            "-",
-            "Mystras",
-            ""
-        )
-    )
+    private lateinit var resourceSpinner: Spinner
+    private lateinit var scanStatus: TextView
+    private lateinit var startButton: Button
+    private lateinit var stopButton: Button
 
     private val handler = Handler(Looper.getMainLooper())
 
+    private val basicFish = mutableListOf<FishResource>()
+    private val mystrasFish = mutableListOf<FishResource>()
+
+    private var selectedFish: FishResource? = null
+    private var scanning = false
+    private var scanCount = 0
+
+    private val gameUrl = "https://www.warofdragons.com/"
+    private val catalogUrl =
+        "https://warofdragons.com/info/library/index.php?id=351&obj=cat"
+
+    private var popupWebView: WebView? = null
+
     private val scanRunnable = object : Runnable {
         override fun run() {
-            if (running) {
-                scanPage()
-                handler.postDelayed(this, 30000)
-            }
+            if (!scanning) return
+
+            scanPage()
+            handler.postDelayed(this, 30000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(6, 6, 6, 6)
+        createInterface()
+        configureWebView()
 
-        status = TextView(this)
-        status.text = "JAWIJK WOD – GOTOWY"
-        status.textSize = 16f
-        status.setPadding(8, 8, 8, 8)
-        layout.addView(status)
+        gameWebView.loadUrl(gameUrl)
+
+        loadFishCatalog()
+        loadMystrasFish()
+    }
+
+    private fun createInterface() {
+
+        root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setBackgroundColor(Color.WHITE)
+
+        val title = TextView(this)
+        title.text = "JAWIJK WOD – ASYSTENT RYBAKA"
+        title.textSize = 18f
+        title.setTextColor(Color.BLACK)
+        title.setPadding(10, 12, 10, 12)
+        title.gravity = android.view.Gravity.CENTER
+
+        root.addView(title)
 
         val categoryTitle = TextView(this)
-        categoryTitle.text = "KATEGORIA SUROWCÓW:"
-        layout.addView(categoryTitle)
+        categoryTitle.text = "WYBIERZ KATEGORIĘ RYB"
+        categoryTitle.setPadding(10, 5, 10, 5)
+        root.addView(categoryTitle)
 
         categorySpinner = Spinner(this)
 
-        val categories = arrayOf(
+        val categories = listOf(
             "Ryby podstawowe – biblioteka",
             "Ryby Mystras"
         )
@@ -97,24 +104,20 @@ class MainActivity : Activity() {
             categories
         )
 
-        layout.addView(categorySpinner)
+        root.addView(categorySpinner)
 
-        val fishTitle = TextView(this)
-        fishTitle.text = "WYBIERZ SUROWIEC:"
-        layout.addView(fishTitle)
+        val resourceTitle = TextView(this)
+        resourceTitle.text = "WYBIERZ SUROWIEC"
+        resourceTitle.setPadding(10, 5, 10, 5)
+        root.addView(resourceTitle)
 
-        fishSpinner = Spinner(this)
-
-        fishSpinner.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            arrayOf("Ładowanie katalogu...")
-        )
-
-        layout.addView(fishSpinner)
+        resourceSpinner = Spinner(this)
+        root.addView(resourceSpinner)
 
         categorySpinner.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
 
                 override fun onItemSelected(
                     parent: AdapterView<*>?,
@@ -122,50 +125,49 @@ class MainActivity : Activity() {
                     position: Int,
                     id: Long
                 ) {
-                    updateFishList()
-                }
-
-                override fun onNothingSelected(
-                    parent: AdapterView<*>?
-                ) {
+                    if (position == 0) {
+                        showFishList(basicFish)
+                    } else {
+                        showFishList(mystrasFish)
+                    }
                 }
             }
 
-        webContainer = FrameLayout(this)
+        resourceSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
 
-        webView = WebView(this)
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
 
-        webContainer.addView(
-            webView,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    val list = if (categorySpinner.selectedItemPosition == 0) {
+                        basicFish
+                    } else {
+                        mystrasFish
+                    }
 
-        layout.addView(
-            webContainer,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
+                    selectedFish = list.getOrNull(position)
+
+                    selectedFish?.let {
+                        scanStatus.text =
+                            "Wybrano: ${it.name}\nPoziom umiejętności: ${it.skill}\nLokacje: ${it.locations}"
+                    }
+                }
+            }
 
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
 
-        val startButton = Button(this)
+        startButton = Button(this)
         startButton.text = "START"
-        startButton.setOnClickListener {
-            startAnalysis()
-        }
 
-        val stopButton = Button(this)
+        stopButton = Button(this)
         stopButton.text = "STOP"
-        stopButton.setOnClickListener {
-            stopAnalysis()
-        }
+        stopButton.isEnabled = false
 
         buttons.addView(
             startButton,
@@ -177,26 +179,24 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        layout.addView(buttons)
+        root.addView(buttons)
 
-        // ZOOM
+        startButton.setOnClickListener {
+            startAnalysis()
+        }
+
+        stopButton.setOnClickListener {
+            stopAnalysis()
+        }
 
         val zoomButtons = LinearLayout(this)
         zoomButtons.orientation = LinearLayout.HORIZONTAL
 
         val zoomOut = Button(this)
-        zoomOut.text = "POMNIEJSZ −"
-
-        zoomOut.setOnClickListener {
-            (popupWebView ?: webView).zoomBy(0.8f)
-        }
+        zoomOut.text = "A−"
 
         val zoomIn = Button(this)
-        zoomIn.text = "POWIĘKSZ +"
-
-        zoomIn.setOnClickListener {
-            (popupWebView ?: webView).zoomBy(1.25f)
-        }
+        zoomIn.text = "A+"
 
         zoomButtons.addView(
             zoomOut,
@@ -208,68 +208,52 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        layout.addView(zoomButtons)
+        root.addView(zoomButtons)
 
-        // WYNIKI
+        zoomOut.setOnClickListener {
+            gameWebView.zoomBy(0.8f)
+        }
 
-        val resultTitle = TextView(this)
-        resultTitle.text = "WYNIKI ANALIZY:"
-        layout.addView(resultTitle)
+        zoomIn.setOnClickListener {
+            gameWebView.zoomBy(1.25f)
+        }
 
         scanStatus = TextView(this)
-        scanStatus.text = "Oczekiwanie na START..."
-        scanStatus.textSize = 11f
-        scanStatus.setPadding(5, 5, 5, 5)
+        scanStatus.text = "Ładowanie biblioteki rybaka..."
+        scanStatus.textSize = 12f
+        scanStatus.setPadding(10, 8, 10, 8)
+        scanStatus.setTextColor(Color.BLACK)
         scanStatus.setTextIsSelectable(true)
 
-        val scroll = ScrollView(this)
-        scroll.addView(scanStatus)
+        root.addView(scanStatus)
 
-        layout.addView(
-            scroll,
+        webContainer = FrameLayout(this)
+
+        root.addView(
+            webContainer,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                130
+                0,
+                1f
             )
         )
 
-        // LICZNIK POŁOWÓW
+        gameWebView = WebView(this)
 
-        val countButton = Button(this)
-        countButton.text = "DODAJ POTWIERDZONY POŁÓW"
-
-        countButton.setOnClickListener {
-            collected++
-            updateStatus()
-        }
-
-        layout.addView(countButton)
-
-        // UKRYTY WEBVIEW KATALOGU
-
-        catalogWebView = WebView(this)
-        catalogWebView.visibility = View.INVISIBLE
-
-        layout.addView(
-            catalogWebView,
-            LinearLayout.LayoutParams(1, 1)
+        webContainer.addView(
+            gameWebView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
         )
 
-        setContentView(layout)
-
-        configureWebView()
-        configureCatalogWebView()
-
-        webView.loadUrl("https://www.warofdragons.com/")
-
-        loadFishCatalog()
+        setContentView(root)
     }
-
-    // KONFIGURACJA GŁÓWNEGO WEBVIEW
 
     private fun configureWebView() {
 
-        val settings = webView.settings
+        val settings = gameWebView.settings
 
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
@@ -277,67 +261,36 @@ class MainActivity : Activity() {
         settings.loadsImagesAutomatically = true
         settings.javaScriptCanOpenWindowsAutomatically = true
         settings.setSupportMultipleWindows(true)
-
+        settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
-
         settings.setSupportZoom(true)
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
 
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
-
         CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance()
+            .setAcceptThirdPartyCookies(gameWebView, true)
 
-        if (android.os.Build.VERSION.SDK_INT >= 21) {
-            CookieManager.getInstance()
-                .setAcceptThirdPartyCookies(webView, true)
-        }
+        gameWebView.webViewClient = WebViewClient()
 
-        webView.webViewClient = object : WebViewClient() {
-
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageFinished(view, url)
-
-                status.text = "Strona gry załadowana"
-            }
-        }
-
-        webView.webChromeClient = object : WebChromeClient() {
+        gameWebView.webChromeClient = object : WebChromeClient() {
 
             override fun onCreateWindow(
                 view: WebView?,
                 isDialog: Boolean,
                 isUserGesture: Boolean,
-                resultMsg: Message?
+                resultMsg: android.os.Message?
             ): Boolean {
 
                 val popup = WebView(this@MainActivity)
 
                 popup.settings.javaScriptEnabled = true
                 popup.settings.domStorageEnabled = true
-                popup.settings.loadsImagesAutomatically = true
-                popup.settings.javaScriptCanOpenWindowsAutomatically = true
                 popup.settings.setSupportMultipleWindows(true)
 
-                popup.settings.useWideViewPort = true
-                popup.settings.loadWithOverviewMode = true
-
-                popup.settings.setSupportZoom(true)
-                popup.settings.builtInZoomControls = true
-                popup.settings.displayZoomControls = false
-
-                CookieManager.getInstance().setAcceptCookie(true)
-
-                if (android.os.Build.VERSION.SDK_INT >= 21) {
-                    CookieManager.getInstance()
-                        .setAcceptThirdPartyCookies(popup, true)
-                }
-
                 popup.webViewClient = WebViewClient()
+
                 popup.webChromeClient = this
 
                 popupWebView = popup
@@ -352,19 +305,17 @@ class MainActivity : Activity() {
 
                 val transport =
                     resultMsg?.obj as? WebView.WebViewTransport
-                        ?: return false
 
-                transport.setWebView(popup)
-                resultMsg.sendToTarget()
+                transport?.webView = popup
+                resultMsg?.sendToTarget()
 
                 return true
             }
 
             override fun onCloseWindow(window: WebView?) {
-
-                if (window != null) {
-                    webContainer.removeView(window)
-                    window.destroy()
+                window?.let {
+                    webContainer.removeView(it)
+                    it.destroy()
                 }
 
                 popupWebView = null
@@ -372,549 +323,375 @@ class MainActivity : Activity() {
         }
     }
 
-    // KONFIGURACJA WEBVIEW KATALOGU
-
-    private fun configureCatalogWebView() {
-
-        catalogWebView.settings.javaScriptEnabled = true
-        catalogWebView.settings.domStorageEnabled = true
-        catalogWebView.settings.loadsImagesAutomatically = true
-
-        catalogWebView.webViewClient = object : WebViewClient() {
-
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageFinished(view, url)
-
-                if (url?.contains("library/index.php") == true) {
-                    readFishCatalog()
-                }
-            }
-        }
-    }
-
-    // POBIERANIE KATALOGU
-
     private fun loadFishCatalog() {
 
-        status.text = "POBIERANIE KATALOGU RYB..."
+        val catalogView = WebView(this)
 
-        catalogWebView.loadUrl(
-            "https://www.warofdragons.com/info/library/index.php?id=351&obj=cat"
-        )
+        catalogView.settings.javaScriptEnabled = true
+        catalogView.settings.domStorageEnabled = true
+
+        catalogView.webViewClient = object : WebViewClient() {
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+
+                readFishCatalog(catalogView)
+            }
+        }
+
+        catalogView.loadUrl(catalogUrl)
     }
 
-    // ODCZYT KATALOGU Z HTML
-
-    private fun readFishCatalog() {
+    private fun readFishCatalog(view: WebView) {
 
         val javascript = """
             (function() {
+                const result = [];
 
-                var tables = document.querySelectorAll("table");
-                var result = [];
+                const tables = Array.from(document.querySelectorAll("table"));
 
-                for (var t = 0; t < tables.length; t++) {
+                let fishTable = null;
 
-                    var table = tables[t];
-                    var rows = table.querySelectorAll("tr");
+                for (const table of tables) {
+                    const headers = Array.from(
+                        table.querySelectorAll("tr:first-child th, tr:first-child td")
+                    ).map(e => (e.innerText || "").trim().toLowerCase());
 
-                    var headerText = (
-                        table.innerText || ""
-                    ).toLowerCase();
+                    const hasSkill = headers.some(x => x.includes("skill level"));
+                    const hasFish = headers.some(x => x === "fish");
+                    const hasMagmar = headers.some(x => x.includes("magmar"));
+                    const hasHuman = headers.some(x => x.includes("human"));
 
-                    if (
-                        headerText.indexOf("skill level") === -1 &&
-                        headerText.indexOf("fisherman") === -1
-                    ) {
+                    if (hasSkill && hasFish && hasMagmar && hasHuman) {
+                        fishTable = table;
+                        break;
+                    }
+                }
+
+                if (!fishTable) {
+                    return JSON.stringify({
+                        error: "Nie znaleziono właściwej tabeli Fisherman resources",
+                        items: []
+                    });
+                }
+
+                const rows = Array.from(fishTable.querySelectorAll("tr"));
+
+                for (const row of rows.slice(1)) {
+                    const cells = Array.from(row.querySelectorAll("td"));
+
+                    if (cells.length < 4) continue;
+
+                    const skill = (cells[0].innerText || "").trim();
+
+                    if (!skill || !Array.from(skill).every(
+                        ch => ch >= "0" && ch <= "9"
+                    )) {
                         continue;
                     }
 
-                    for (var r = 0; r < rows.length; r++) {
+                    const fishCell = cells[1];
 
-                        var cells = rows[r].querySelectorAll("td");
+                    const img = fishCell.querySelector("img");
 
-                        if (cells.length < 2) continue;
+                    const link = fishCell.querySelector("a");
 
-                        var images = cells[1].querySelectorAll("img");
+                    let name = "";
 
-                        var name = "";
-                        var image = "";
-
-                        for (var i = 0; i < images.length; i++) {
-
-                            var img = images[i];
-
-                            name =
-                                img.getAttribute("alt") ||
-                                img.getAttribute("title") ||
-                                "";
-
-                            image =
-                                img.getAttribute("src") || "";
-
-                            if (name || image) break;
-                        }
-
-                        if (!name) {
-                            name = (
-                                cells[1].innerText || ""
-                            ).trim();
-                        }
-
-                        if (!name && !image) continue;
-
-                        var skill = (
-                            cells[0].innerText || ""
-                        ).trim();
-
-                        var locations = [];
-
-                        for (var c = 2; c < cells.length; c++) {
-
-                            var txt = (
-                                cells[c].innerText || ""
-                            ).trim();
-
-                            if (txt) {
-                                locations.push(txt);
-                            }
-                        }
-
-                        result.push({
-                            name: name,
-                            skill: skill,
-                            locations: locations.join(" / "),
-                            image: image
-                        });
+                    if (img) {
+                        name = img.getAttribute("alt") ||
+                               img.getAttribute("title") || "";
                     }
+
+                    if (!name && link) {
+                        name = link.innerText || link.getAttribute("title") || "";
+                    }
+
+                    if (!name && img) {
+                        const src = img.getAttribute("src") || "";
+                        name = src.split("/").pop().split("?")[0];
+                    }
+
+                    if (!name) {
+                        name = "Ryba – poziom " + skill;
+                    }
+
+                    const image = img
+                        ? img.src
+                        : "";
+
+                    const magmar = (cells[2].innerText || "").trim();
+                    const human = (cells[3].innerText || "").trim();
+
+                    result.push({
+                        name: name,
+                        skill: skill,
+                        locations: "Magmar: " + magmar +
+                                   " | Ludzie: " + human,
+                        image: image
+                    });
                 }
 
-                return {
-                    count: result.length,
+                return JSON.stringify({
+                    error: "",
                     items: result
-                };
-
+                });
             })();
         """.trimIndent()
 
-        catalogWebView.evaluateJavascript(javascript) { result ->
+        view.evaluateJavascript(javascript) { result ->
 
             try {
-
                 if (result == null || result == "null") {
-                    status.text = "Nie udało się odczytać katalogu."
+                    scanStatus.text = "Biblioteka nie zwróciła danych."
                     return@evaluateJavascript
                 }
 
-                val data = JSONObject(result)
+                val decodedString = JSONArray("[$result]").getString(0)
+                val json = JSONObject(decodedString)
 
-                val items =
-                    data.optJSONArray("items") ?: JSONArray()
+                val error = json.optString("error")
+                val items = json.optJSONArray("items")
 
                 basicFish.clear()
 
-                for (i in 0 until items.length()) {
+                if (items != null) {
+                    for (i in 0 until items.length()) {
 
-                    val item = items.getJSONObject(i)
-
-                    val name = item.optString("name").trim()
-
-                    if (name.isNotEmpty()) {
+                        val item = items.getJSONObject(i)
 
                         basicFish.add(
                             FishResource(
-                                name,
-                                item.optString("skill"),
-                                item.optString("locations"),
-                                item.optString("image")
+                                name = item.optString("name"),
+                                skill = item.optString("skill"),
+                                locations = item.optString("locations"),
+                                image = item.optString("image")
                             )
                         )
                     }
                 }
 
-                updateFishList()
-
-                status.text = if (basicFish.isNotEmpty()) {
-                    "KATALOG: ${basicFish.size} POZYCJI"
+                if (basicFish.isEmpty()) {
+                    scanStatus.text =
+                        "Nie pobrano ryb z biblioteki.\n$error"
                 } else {
-                    "Biblioteka otwarta, ale nie odczytano nazw ryb."
+                    showFishList(basicFish)
+
+                    scanStatus.text =
+                        "Pobrano ryby z biblioteki: ${basicFish.size}"
                 }
 
             } catch (e: Exception) {
-
-                status.text = "Błąd katalogu: ${e.message}"
+                scanStatus.text =
+                    "Błąd odczytu biblioteki: ${e.message}"
             }
         }
     }
 
-    // AKTUALIZACJA LISTY WYBORU
+    private fun loadMystrasFish() {
 
-    private fun updateFishList() {
+        mystrasFish.clear()
 
-        val selectedCategory = categorySpinner.selectedItemPosition
+        mystrasFish.add(
+            FishResource(
+                "Golden Shams",
+                "Mystras",
+                "Mystras",
+                ""
+            )
+        )
 
-        val names = if (selectedCategory == 0) {
+        mystrasFish.add(
+            FishResource(
+                "Mystras Serpentfish",
+                "Mystras",
+                "Mystras",
+                ""
+            )
+        )
 
-            if (basicFish.isEmpty()) {
+        mystrasFish.add(
+            FishResource(
+                "Akduff the Multiped",
+                "Mystras",
+                "Mystras",
+                ""
+            )
+        )
+    }
 
-                listOf("Katalog jeszcze się ładuje")
+    private fun showFishList(list: List<FishResource>) {
 
-            } else {
-
-                basicFish.map {
-                    "${it.name} | poziom ${it.skill}"
-                }
-            }
-
+        val names = if (list.isEmpty()) {
+            listOf("Brak dostępnych surowców")
         } else {
-
-            mystrasFish.map {
-                it.name
+            list.map {
+                "${it.name} – poziom ${it.skill}"
             }
         }
 
-        fishSpinner.adapter = ArrayAdapter(
+        val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
             names
         )
-    }
 
-    // WYBRANA RYBA
+        resourceSpinner.adapter = adapter
 
-    private fun getSelectedFishName(): String {
-
-        val category = categorySpinner.selectedItemPosition
-        val position = fishSpinner.selectedItemPosition
-
-        if (category == 0) {
-
-            if (position !in basicFish.indices) {
-                return ""
-            }
-
-            return basicFish[position].name
+        if (list.isNotEmpty()) {
+            selectedFish = list[0]
+        } else {
+            selectedFish = null
         }
-
-        if (position !in mystrasFish.indices) {
-            return ""
-        }
-
-        return mystrasFish[position].name
     }
-
-    // START ANALIZY
 
     private fun startAnalysis() {
 
-        if (running) return
-
-        val selectedFish = getSelectedFishName()
-
-        if (
-            selectedFish.isEmpty() ||
-            selectedFish == "Katalog jeszcze się ładuje"
-        ) {
-
-            Toast.makeText(
-                this,
-                "Wybierz surowiec z listy.",
-                Toast.LENGTH_LONG
-            ).show()
-
+        if (selectedFish == null) {
+            scanStatus.text = "Najpierw wybierz surowiec."
             return
         }
 
-        running = true
+        scanning = true
         scanCount = 0
 
-        scanStatus.text =
-            "Rozpoczynam analizę: $selectedFish"
+        startButton.isEnabled = false
+        stopButton.isEnabled = true
 
-        status.text = "ANALIZA AKTYWNA"
+        scanStatus.text =
+            "ANALIZA URUCHOMIONA\nWybrano: ${selectedFish!!.name}"
+
+        scanPage()
 
         handler.removeCallbacks(scanRunnable)
-        handler.post(scanRunnable)
+        handler.postDelayed(scanRunnable, 30000)
     }
-
-    // STOP ANALIZY
 
     private fun stopAnalysis() {
 
-        running = false
+        scanning = false
 
         handler.removeCallbacks(scanRunnable)
 
-        status.text = "ANALIZA ZATRZYMANA"
+        startButton.isEnabled = true
+        stopButton.isEnabled = false
+
+        clearHighlights()
 
         scanStatus.text =
-            "Analiza została zatrzymana."
+            "Analiza zatrzymana.\nWykonane skany: $scanCount"
     }
-
-    // SKANOWANIE
 
     private fun scanPage() {
 
-        if (!running) return
+        val fish = selectedFish ?: return
 
-        val activeWebView = popupWebView ?: webView
-
-        val selectedFish = getSelectedFishName()
-
-        if (selectedFish.isEmpty()) return
-
-        // MYSTRAS
-
-        if (categorySpinner.selectedItemPosition == 1) {
-
-            scanCount++
-
-            scanStatus.text =
-                "SKAN: $scanCount\n" +
-                "TRYB: MYSTRAS\n" +
-                "WYBRANO: $selectedFish\n\n" +
-                "Rozpoznawanie kolorów ikon na mapie nie jest jeszcze aktywne."
-
-            status.text =
-                "SKAN: $scanCount | POŁOWY: $collected"
-
-            return
-        }
-
-        // RYBY PODSTAWOWE
-
-        val escapedFish = JSONObject.quote(selectedFish)
+        val targetName = JSONObject.quote(fish.name)
+        val targetImage = JSONObject.quote(fish.image)
 
         val javascript = """
             (function() {
 
-                var target = $escapedFish;
-                var elements = [];
+                const targetName = $targetName.toLowerCase();
+                const targetImage = $targetImage.toLowerCase();
 
-                var found = document.querySelectorAll(
-                    'a, button, [role="button"], [onclick], img, svg, canvas, [style*="background"]'
+                const elements = Array.from(
+                    document.querySelectorAll(
+                        "a, button, img, [role='button'], [title], [alt]"
+                    )
                 );
 
-                var targetLower = target.toLowerCase();
+                let found = [];
 
-                for (var i = 0; i < found.length; i++) {
+                for (const el of elements) {
 
-                    var el = found[i];
-
-                    var rect = el.getBoundingClientRect();
-
-                    if (
-                        rect.width <= 0 ||
-                        rect.height <= 0 ||
-                        rect.bottom <= 0 ||
-                        rect.right <= 0 ||
-                        rect.top >= window.innerHeight ||
-                        rect.left >= window.innerWidth
-                    ) {
-                        continue;
-                    }
-
-                    var text = (
-                        el.innerText ||
-                        el.textContent ||
-                        ""
-                    ).trim();
-
-                    var title =
-                        el.getAttribute("title") || "";
-
-                    var alt =
-                        el.getAttribute("alt") || "";
-
-                    var src =
-                        el.getAttribute("src") || "";
-
-                    var searchable = (
-                        text + " " + title + " " + alt + " " + src
+                    const text = (
+                        (el.innerText || "") + " " +
+                        (el.getAttribute("title") || "") + " " +
+                        (el.getAttribute("alt") || "") + " " +
+                        (el.getAttribute("src") || "") + " " +
+                        (el.getAttribute("href") || "")
                     ).toLowerCase();
 
-                    var matches =
-                        searchable.indexOf(targetLower) !== -1;
+                    let match = false;
 
-                    if (matches) {
-
-                        function flash(times) {
-
-                            if (times <= 0) {
-                                el.style.outline = "";
-                                return;
-                            }
-
-                            el.style.outline = "4px solid red";
-
-                            setTimeout(function() {
-
-                                el.style.outline = "none";
-
-                                setTimeout(function() {
-                                    flash(times - 1);
-                                }, 150);
-
-                            }, 200);
-                        }
-
-                        flash(2);
+                    if (targetName && text.includes(targetName)) {
+                        match = true;
                     }
 
-                    elements.push({
-                        tag: el.tagName,
-                        text: text.substring(0, 80),
-                        title: title,
-                        alt: alt,
-                        src: src,
-                        matches: matches
-                    });
+                    if (targetImage && targetImage.length > 0 &&
+                        text.includes(targetImage)) {
+                        match = true;
+                    }
 
-                    if (elements.length >= 60) break;
+                    if (match) {
+                        found.push(el);
+                    }
                 }
 
-                return {
-                    url: location.href,
-                    target: target,
-                    items: elements
-                };
+                if (window.jawijkFlashTimer) {
+                    clearInterval(window.jawijkFlashTimer);
+                }
+
+                found.forEach(el => {
+                    el.dataset.jawijkOldOutline =
+                        el.style.outline || "";
+
+                    el.style.outline = "4px solid red";
+                    el.style.outlineOffset = "2px";
+                });
+
+                let visible = true;
+
+                window.jawijkFlashTimer = setInterval(function() {
+                    visible = !visible;
+
+                    found.forEach(el => {
+                        el.style.outline = visible
+                            ? "4px solid red"
+                            : "none";
+                    });
+                }, 250);
+
+                return found.length;
+            })();
+        """.trimIndent()
+
+        gameWebView.evaluateJavascript(javascript) { result ->
+
+            scanCount++
+
+            val found = result?.toIntOrNull() ?: 0
+
+            scanStatus.text =
+                "ANALIZA: ${fish.name}\n" +
+                "Znalezione elementy: $found\n" +
+                "Liczba skanów: $scanCount\n" +
+                "Kolejny skan za 30 sekund."
+        }
+    }
+
+    private fun clearHighlights() {
+
+        val javascript = """
+            (function() {
+
+                if (window.jawijkFlashTimer) {
+                    clearInterval(window.jawijkFlashTimer);
+                }
+
+                document.querySelectorAll("*").forEach(el => {
+                    if (el.style.outline === "none" ||
+                        el.style.outline.includes("red")) {
+                        el.style.outline = "";
+                        el.style.outlineOffset = "";
+                    }
+                });
 
             })();
         """.trimIndent()
 
-        activeWebView.evaluateJavascript(javascript) { result ->
-
-            if (!running || result == null || result == "null") {
-                return@evaluateJavascript
-            }
-
-            try {
-
-                val data = JSONObject(result)
-
-                val items = data.optJSONArray("items")
-
-                scanCount++
-
-                var foundFish = false
-
-                val output = StringBuilder()
-
-                output.append("SKAN: $scanCount\n")
-                output.append("SZUKANA RYBA: $selectedFish\n\n")
-
-                if (items != null) {
-
-                    for (i in 0 until items.length()) {
-
-                        val item = items.getJSONObject(i)
-
-                        if (item.optBoolean("matches")) {
-
-                            foundFish = true
-
-                            output.append(
-                                "ZNALEZIONO PASUJĄCY ELEMENT!\n"
-                            )
-
-                            output.append(
-                                "Typ: ${item.optString("tag")}\n"
-                            )
-
-                            output.append(
-                                "Tekst: ${item.optString("text")}\n"
-                            )
-
-                            output.append(
-                                "Obraz: ${item.optString("alt")}\n"
-                            )
-
-                            output.append(
-                                "Adres: ${item.optString("src")}\n"
-                            )
-
-                            output.append("--------------------\n")
-                        }
-                    }
-                }
-
-                if (!foundFish) {
-
-                    output.append(
-                        "Nie znaleziono pasującego elementu DOM.\n"
-                    )
-
-                    output.append(
-                        "Ikony na Canvas/WebGL wymagają analizy obrazu."
-                    )
-                }
-
-                scanStatus.text = output.toString()
-
-                status.text =
-                    "SKAN: $scanCount | POŁOWY: $collected"
-
-            } catch (e: Exception) {
-
-                scanStatus.text =
-                    "Błąd analizy: ${e.message}"
-            }
-        }
+        gameWebView.evaluateJavascript(javascript, null)
     }
 
-    // AKTUALIZACJA LICZNIKA
-
-    private fun updateStatus() {
-
-        status.text =
-            "POŁOWY: $collected | SKANY: $scanCount"
-    }
-
-    // PRZYCISK WSTECZ
-
-    @Suppress("DEPRECATION")
     override fun onBackPressed() {
-
-        val popup = popupWebView
-
-        if (popup != null) {
-
-            webContainer.removeView(popup)
-
-            popup.destroy()
-
-            popupWebView = null
-
-            return
-        }
-
-        if (webView.canGoBack()) {
-
-            webView.goBack()
-
-        } else {
-
-            super.onBackPressed()
-        }
-    }
-
-    // ZAMYKANIE APLIKACJI
-
-    override fun onDestroy() {
-
-        running = false
-
-        handler.removeCallbacks(scanRunnable)
-
-        popupWebView?.destroy()
-        popupWebView = null
-
-        catalogWebView.destroy()
-        webView.destroy()
-
-        super.onDestroy()
-    }
-}
