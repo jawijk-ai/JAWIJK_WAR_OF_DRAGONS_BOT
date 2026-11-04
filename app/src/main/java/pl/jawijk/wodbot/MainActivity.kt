@@ -39,7 +39,6 @@ class MainActivity : Activity() {
             if (!running) return
 
             analyzeScreen()
-
             handler.postDelayed(this, 3000)
         }
     }
@@ -87,7 +86,7 @@ class MainActivity : Activity() {
         layout.addView(buttons)
 
         val resultTitle = TextView(this)
-        resultTitle.text = "WYKRYTE ELEMENTY GRY:"
+        resultTitle.text = "WYKRYTE IKONY I OBRAZY:"
         resultTitle.setPadding(10, 5, 10, 5)
         layout.addView(resultTitle)
 
@@ -95,14 +94,14 @@ class MainActivity : Activity() {
         scanStatus.text = "Oczekiwanie na skanowanie..."
         scanStatus.textSize = 11f
         scanStatus.setPadding(10, 5, 10, 5)
-        scanStatus.maxLines = 20
+        scanStatus.maxLines = 35
         scanStatus.isTextSelectable = true
 
         layout.addView(
             scanStatus,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                180
+                220
             )
         )
 
@@ -161,7 +160,7 @@ class MainActivity : Activity() {
         running = true
         scanCount = 0
 
-        scanStatus.text = "Uruchomiono analizę co 3 sekundy."
+        scanStatus.text = "Analiza ikon uruchomiona."
 
         handler.removeCallbacks(scanTask)
         handler.post(scanTask)
@@ -189,79 +188,189 @@ class MainActivity : Activity() {
         scanInProgress = true
 
         val script = """
-            (function() {
+        (function() {
 
-                const elements = Array.from(
-                    document.querySelectorAll(
-                        'a, button, img, [role="button"], ' +
-                        '[onclick], [style*="background"]'
-                    )
+            const results = [];
+            const seen = new Set();
+
+            function visible(el) {
+
+                const r = el.getBoundingClientRect();
+                const s = getComputedStyle(el);
+
+                return (
+                    r.width > 10 &&
+                    r.height > 10 &&
+                    s.display !== 'none' &&
+                    s.visibility !== 'hidden' &&
+                    s.opacity !== '0' &&
+                    r.bottom > 0 &&
+                    r.right > 0 &&
+                    r.top < window.innerHeight &&
+                    r.left < window.innerWidth
                 );
+            }
 
-                const results = [];
+            function addElement(el, sourceType, sourceUrl) {
 
-                elements.forEach(function(el) {
+                if (!el || !visible(el)) return;
 
-                    const r = el.getBoundingClientRect();
-                    const s = getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                const s = getComputedStyle(el);
 
-                    if (
-                        r.width <= 10 ||
-                        r.height <= 10 ||
-                        s.display === 'none' ||
-                        s.visibility === 'hidden' ||
-                        s.opacity === '0' ||
-                        r.bottom <= 0 ||
-                        r.right <= 0 ||
-                        r.top >= window.innerHeight ||
-                        r.left >= window.innerWidth
-                    ) {
-                        return;
-                    }
+                const width = Math.round(r.width);
+                const height = Math.round(r.height);
 
-                    const bg = s.backgroundImage;
+                if (width < 15 || height < 15) return;
 
-                    results.push({
+                const ratio = width / height;
 
-                        tag: el.tagName,
+                // Interesują nas głównie ikony,
+                // a nie duże zdjęcia i banery.
+                if (
+                    width > 500 ||
+                    height > 500 ||
+                    ratio < 0.45 ||
+                    ratio > 2.2
+                ) return;
 
-                        text: (
-                            el.innerText || ''
-                        ).trim().slice(0, 40),
+                const url = sourceUrl || '';
 
-                        title: el.title || '',
+                const key = [
+                    sourceType,
+                    url,
+                    Math.round(r.x),
+                    Math.round(r.y),
+                    width,
+                    height
+                ].join('|');
 
-                        alt: el.alt || '',
+                if (seen.has(key)) return;
 
-                        src: el.currentSrc || el.src || '',
+                seen.add(key);
 
-                        background: (
-                            bg && bg !== 'none'
-                            ? bg.slice(0, 300)
-                            : ''
-                        ),
+                results.push({
 
-                        className: String(
-                            el.className || ''
-                        ).slice(0, 100),
+                    type: sourceType,
 
-                        x: Math.round(r.x),
+                    tag: el.tagName,
 
-                        y: Math.round(r.y),
+                    url: url.substring(0, 350),
 
-                        width: Math.round(r.width),
+                    alt: el.alt || '',
 
-                        height: Math.round(r.height)
+                    title: el.title || '',
 
-                    });
+                    className: String(
+                        el.className || ''
+                    ).substring(0, 100),
+
+                    x: Math.round(r.x),
+
+                    y: Math.round(r.y),
+
+                    width: width,
+
+                    height: height
+
+                });
+            }
+
+            function scanDocument(doc) {
+
+                if (!doc || !doc.body) return;
+
+                // Obrazki IMG
+                doc.querySelectorAll('img').forEach(function(el) {
+
+                    addElement(
+                        el,
+                        'IMG',
+                        el.currentSrc || el.src || ''
+                    );
 
                 });
 
-                return JSON.stringify(
-                    results.slice(0, 80)
-                );
+                // Elementy SVG
+                doc.querySelectorAll('svg').forEach(function(el) {
 
-            })();
+                    addElement(
+                        el,
+                        'SVG',
+                        ''
+                    );
+
+                });
+
+                // Elementy z obrazkiem w tle
+                doc.querySelectorAll('*').forEach(function(el) {
+
+                    const style = getComputedStyle(el);
+                    const bg = style.backgroundImage;
+
+                    if (bg && bg !== 'none') {
+
+                        addElement(
+                            el,
+                            'BACKGROUND',
+                            bg
+                        );
+                    }
+
+                    // Elementy, które mogą być ikonami
+                    if (
+                        el.tagName === 'CANVAS' ||
+                        el.getAttribute('role') === 'button' ||
+                        el.hasAttribute('onclick')
+                    ) {
+
+                        addElement(
+                            el,
+                            el.tagName,
+                            ''
+                        );
+                    }
+
+                });
+
+                // Dostępne ramki iframe
+                doc.querySelectorAll('iframe').forEach(function(frame) {
+
+                    try {
+
+                        const frameDoc =
+                            frame.contentDocument ||
+                            frame.contentWindow.document;
+
+                        scanDocument(frameDoc);
+
+                    } catch(e) {
+
+                        // Nie można odczytać obcej domeny.
+                    }
+
+                });
+
+            }
+
+            scanDocument(document);
+
+            results.sort(function(a, b) {
+
+                return (a.width * a.height) -
+                       (b.width * b.height);
+
+            });
+
+            return JSON.stringify({
+
+                total: results.length,
+
+                images: results.slice(0, 100)
+
+            });
+
+        })();
         """.trimIndent()
 
         activeView.evaluateJavascript(script) { result ->
@@ -275,19 +384,90 @@ class MainActivity : Activity() {
             val decoded = try {
 
                 JSONTokener(result ?: "null").nextValue()
-                    as? String ?: "Brak wyników"
+                    as? String ?: ""
 
             } catch (e: Exception) {
 
-                result ?: "Brak wyników"
+                ""
             }
 
-            val displayResult = decoded.take(4500)
+            if (decoded.isBlank()) {
 
-            scanStatus.text =
-                "Skan: $scanCount\n" +
-                "Elementy strony:\n" +
-                displayResult
+                scanStatus.text =
+                    "Skan: $scanCount\n" +
+                    "Nie udało się odczytać wyników."
+
+                updateStatus()
+                return@evaluateJavascript
+            }
+
+            try {
+
+                val json = org.json.JSONObject(decoded)
+
+                val total = json.optInt("total", 0)
+                val images = json.optJSONArray("images")
+
+                val output = StringBuilder()
+
+                output.append("Skan: $scanCount\n")
+                output.append("Wykryte elementy: $total\n\n")
+
+                if (images == null || images.length() == 0) {
+
+                    output.append(
+                        "Nie znaleziono ikon.\n"
+                    )
+
+                    output.append(
+                        "Możliwe, że gra używa Canvas lub WebGL."
+                    )
+
+                } else {
+
+                    for (i in 0 until images.length()) {
+
+                        val item = images.getJSONObject(i)
+
+                        output.append("ELEMENT ${i + 1}\n")
+
+                        output.append(
+                            "Typ: ${item.optString("type")}\n"
+                        )
+
+                        output.append(
+                            "Rozmiar: " +
+                            "${item.optInt("width")} x " +
+                            "${item.optInt("height")}\n"
+                        )
+
+                        output.append(
+                            "Pozycja: " +
+                            "${item.optInt("x")}, " +
+                            "${item.optInt("y")}\n"
+                        )
+
+                        val alt = item.optString("alt")
+                        if (alt.isNotBlank()) {
+                            output.append("Alt: $alt\n")
+                        }
+
+                        val url = item.optString("url")
+                        if (url.isNotBlank()) {
+                            output.append("Adres: $url\n")
+                        }
+
+                        output.append("\n")
+                    }
+                }
+
+                scanStatus.text = output.toString().take(6000)
+
+            } catch (e: Exception) {
+
+                scanStatus.text =
+                    "Błąd odczytu wyników:\n${e.message}"
+            }
 
             updateStatus()
         }
