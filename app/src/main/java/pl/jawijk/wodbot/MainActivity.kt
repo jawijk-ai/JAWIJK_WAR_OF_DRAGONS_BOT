@@ -191,6 +191,8 @@ class MainActivity : Activity() {
                 }
             }
 
+        // START I STOP
+
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
 
@@ -220,6 +222,8 @@ class MainActivity : Activity() {
         stopButton.setOnClickListener {
             stopAnalysis()
         }
+
+        // ZOOM
 
         val zoomButtons = LinearLayout(this)
         zoomButtons.orientation = LinearLayout.HORIZONTAL
@@ -401,6 +405,8 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    // BIBLIOTEKA RYBAKA
 
     private fun loadFishCatalog() {
 
@@ -595,6 +601,8 @@ class MainActivity : Activity() {
         }
     }
 
+    // RYBY MYSTRAS
+
     private fun loadMystrasFish() {
 
         mystrasFish.clear()
@@ -627,6 +635,8 @@ class MainActivity : Activity() {
         )
     }
 
+    // LISTA SUROWCÓW
+
     private fun showFishList(list: List<FishResource>) {
 
         val names = if (list.isEmpty()) {
@@ -648,6 +658,8 @@ class MainActivity : Activity() {
 
         selectedFish = list.firstOrNull()
     }
+
+    // START
 
     private fun startAnalysis() {
 
@@ -678,6 +690,8 @@ class MainActivity : Activity() {
         )
     }
 
+    // STOP
+
     private fun stopAnalysis() {
 
         scanning = false
@@ -692,7 +706,9 @@ class MainActivity : Activity() {
         scanStatus.text =
             "Analiza zatrzymana. Liczba skanów: $scanCount"
     }
-        private fun scanPage() {
+        // LOSOWE OZNACZANIE JEDNEGO OBRAZKA
+
+    private fun scanPage() {
 
         val fish = selectedFish ?: return
 
@@ -701,78 +717,131 @@ class MainActivity : Activity() {
 
                 const images = Array.from(
                     document.querySelectorAll("img")
-                );
+                ).filter(img => {
 
-                let marked = 0;
+                    const rect = img.getBoundingClientRect();
 
-                images.forEach(img => {
-
-                    if (
-                        img.naturalWidth < 10 ||
-                        img.naturalHeight < 10 ||
-                        img.getBoundingClientRect().width <= 0 ||
-                        img.getBoundingClientRect().height <= 0
-                    ) {
-                        return;
-                    }
-
-                    img.style.outline = "4px solid red";
-                    img.style.outlineOffset = "2px";
-                    img.style.boxShadow = "0 0 8px red";
-
-                    marked++;
+                    return (
+                        img.complete &&
+                        img.naturalWidth >= 10 &&
+                        img.naturalHeight >= 10 &&
+                        rect.width > 0 &&
+                        rect.height > 0
+                    );
                 });
 
+                if (images.length === 0) {
+
+                    return JSON.stringify({
+                        found: 0,
+                        selected: -1
+                    });
+                }
+
+                // LOSOWANIE JEDNEGO OBRAZKA
+
+                const index = Math.floor(
+                    Math.random() * images.length
+                );
+
+                const selected = images[index];
+
+                // PRZEWIJANIE DO OBRAZKA
+
+                selected.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                    inline: "center"
+                });
+
+                // PIERWSZE OZNACZENIE
+
+                selected.style.outline = "5px solid red";
+                selected.style.outlineOffset = "4px";
+                selected.style.boxShadow = "0 0 15px red";
+
+                // USUNIĘCIE PIERWSZEGO OZNACZENIA
+
+                setTimeout(function() {
+
+                    selected.style.outline = "none";
+                    selected.style.boxShadow = "none";
+
+                }, 200);
+
+                // DRUGIE OZNACZENIE
+
+                setTimeout(function() {
+
+                    selected.style.outline = "5px solid red";
+                    selected.style.outlineOffset = "4px";
+                    selected.style.boxShadow = "0 0 15px red";
+
+                }, 400);
+
+                // ZAKOŃCZENIE OZNACZENIA
+
+                setTimeout(function() {
+
+                    selected.style.outline = "none";
+                    selected.style.boxShadow = "none";
+
+                }, 800);
+
                 return JSON.stringify({
-                    images: images.length,
-                    marked: marked
+
+                    found: images.length,
+                    selected: index + 1
+
                 });
 
             })();
         """.trimIndent()
 
-        fun scanWindow(
-            webView: WebView,
-            name: String
-        ) {
+        gameWebView.evaluateJavascript(javascript) { result ->
 
-            webView.evaluateJavascript(javascript) { result ->
+            try {
 
-                try {
-
-                    if (result == null || result == "null") {
-                        return@evaluateJavascript
-                    }
-
-                    val decoded =
-                        JSONArray("[$result]").getString(0)
-
-                    val data = JSONObject(decoded)
-
-                    scanCount++
+                if (result == null || result == "null") {
 
                     scanStatus.text =
-                        "OKNO: $name\n" +
-                        "Wybrany surowiec: ${fish.name}\n" +
-                        "Obrazki: ${data.optInt("images")}\n" +
-                        "Oznaczone: ${data.optInt("marked")}\n" +
-                        "Czas między analizami: ${scanInterval / 1000} s\n" +
-                        "Skan: $scanCount"
+                        "Brak wyniku analizy"
 
-                } catch (e: Exception) {
-
-                    scanStatus.text =
-                        "Błąd: ${e.message}"
+                    return@evaluateJavascript
                 }
+
+                val decoded =
+                    JSONArray("[$result]").getString(0)
+
+                val data = JSONObject(decoded)
+
+                scanCount++
+
+                if (data.optInt("found") == 0) {
+
+                    scanStatus.text =
+                        "Nie znaleziono obrazków do oznaczenia."
+
+                } else {
+
+                    scanStatus.text =
+                        "WYBRANY SUROWIEC: ${fish.name}\n" +
+                        "Znalezione obrazki: ${data.optInt("found")}\n" +
+                        "Wylosowany obrazek: ${data.optInt("selected")}\n" +
+                        "Oznaczenie: DWUKROTNE\n" +
+                        "Czas analizy: ${scanInterval / 1000} sekund\n" +
+                        "Liczba analiz: $scanCount"
+                }
+
+            } catch (e: Exception) {
+
+                scanStatus.text =
+                    "Błąd oznaczania: ${e.message}"
             }
         }
-
-        scanWindow(gameWebView, "GŁÓWNE")
-
-        popupWebView?.let {
-            scanWindow(it, "DODATKOWE")
-        }
     }
+
+    // USUWANIE OZNACZEŃ
 
     private fun clearHighlights() {
 
@@ -790,13 +859,18 @@ class MainActivity : Activity() {
             })();
         """.trimIndent()
 
-        gameWebView.evaluateJavascript(javascript, null)
+        gameWebView.evaluateJavascript(
+            javascript,
+            null
+        )
 
         popupWebView?.evaluateJavascript(
             javascript,
             null
         )
     }
+
+    // POWRÓT
 
     override fun onBackPressed() {
 
@@ -816,6 +890,8 @@ class MainActivity : Activity() {
 
         super.onBackPressed()
     }
+
+    // ZAMYKANIE
 
     override fun onDestroy() {
 
