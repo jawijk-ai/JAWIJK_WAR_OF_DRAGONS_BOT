@@ -1,4 +1,4 @@
-kotlin
+```kotlin
 package pl.jawijk.wodbot
 
 import android.app.Activity
@@ -13,7 +13,6 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import org.json.JSONObject
 import org.json.JSONArray
 
 class MainActivity : Activity() {
@@ -32,7 +31,6 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // Kolejne skanowanie co 20 sekund
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (running && !scanInProgress) {
@@ -155,7 +153,7 @@ class MainActivity : Activity() {
 
         webView.loadUrl("https://www.warofdragons.com/")
     }
-kotlin
+
     private fun configureWebView() {
 
         val settings = webView.settings
@@ -275,6 +273,7 @@ kotlin
         status.text = "ANALIZA ZATRZYMANA"
         scanStatus.text = "Analiza została zatrzymana."
     }
+
     private fun scanPage() {
 
         if (!running || scanInProgress) return
@@ -292,7 +291,6 @@ kotlin
                 for (var i = 0; i < selects.length; i++) {
 
                     var select = selects[i];
-
                     var options = [];
 
                     for (var j = 0; j < select.options.length; j++) {
@@ -313,7 +311,6 @@ kotlin
                 }
 
                 var canvases = document.querySelectorAll('canvas');
-
                 var canvasInfo = [];
 
                 for (var k = 0; k < canvases.length; k++) {
@@ -433,9 +430,9 @@ kotlin
                 }
 
                 output.append(
-                    "\nTo jest skan diagnostyczny. " +
-                    "Wykrywanie kółek zostanie dodane po ustaleniu " +
-                    "sposobu rysowania znaczników przez grę."
+                    "\nSkan diagnostyczny zakończony. " +
+                    "Wykrywanie kółek wymaga ustalenia sposobu " +
+                    "rysowania znaczników przez grę."
                 )
 
                 scanStatus.text = output.toString()
@@ -483,7 +480,6 @@ kotlin
     override fun onDestroy() {
 
         running = false
-
         handler.removeCallbacks(scanRunnable)
 
         popupWebView?.destroy()
