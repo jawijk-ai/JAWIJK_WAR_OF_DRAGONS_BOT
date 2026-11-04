@@ -167,7 +167,169 @@ class MainActivity : Activity() {
                         0 -> 1000L
                         1 -> 5000L
                         2 -> 10000L
-                        private fun configureWebView() {
+                        3 -> 15000L
+                        4 -> 30000L
+                        5 -> 60000L
+                        6 -> 120000L
+                        7 -> 300000L
+                        else -> 30000L
+                    }
+
+                    scanStatus.text =
+                        "Ustawiony czas analizy: " +
+                        timeOptions[position]
+
+                    if (scanning) {
+
+                        handler.removeCallbacks(scanRunnable)
+
+                        handler.postDelayed(
+                            scanRunnable,
+                            scanInterval
+                        )
+                    }
+                }
+            }
+
+        val buttons = LinearLayout(this)
+        buttons.orientation = LinearLayout.HORIZONTAL
+
+        startButton = Button(this)
+        startButton.text = "START"
+
+        stopButton = Button(this)
+        stopButton.text = "STOP"
+        stopButton.isEnabled = false
+
+        buttons.addView(
+            startButton,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        buttons.addView(
+            stopButton,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        root.addView(buttons)
+
+        startButton.setOnClickListener {
+            startAnalysis()
+        }
+
+        stopButton.setOnClickListener {
+            stopAnalysis()
+        }
+
+        val zoomButtons = LinearLayout(this)
+        zoomButtons.orientation = LinearLayout.HORIZONTAL
+
+        val zoomOut = Button(this)
+        zoomOut.text = "A−"
+
+        val zoomIn = Button(this)
+        zoomIn.text = "A+"
+
+        zoomButtons.addView(
+            zoomOut,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        zoomButtons.addView(
+            zoomIn,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        root.addView(zoomButtons)
+
+        scanStatus = TextView(this)
+        scanStatus.text = "Ładowanie biblioteki rybaka..."
+        scanStatus.textSize = 12f
+        scanStatus.setPadding(10, 8, 10, 8)
+        scanStatus.setTextColor(Color.BLACK)
+        scanStatus.setTextIsSelectable(true)
+
+        root.addView(scanStatus)
+
+        webContainer = FrameLayout(this)
+
+        root.addView(
+            webContainer,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+
+        gameWebView = WebView(this)
+
+        webContainer.addView(
+            gameWebView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        setContentView(root)
+
+        zoomOut.setOnClickListener {
+            gameWebView.zoomBy(0.8f)
+        }
+
+        zoomIn.setOnClickListener {
+            gameWebView.zoomBy(1.25f)
+        }
+
+        categorySpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+
+                override fun onNothingSelected(
+                    parent: AdapterView<*>?
+                ) {}
+
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+
+                    if (position == 0) {
+                        showFishList(basicFish)
+                    } else {
+                        showFishList(mystrasFish)
+                    }
+                }
+            }
+
+        resourceSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+
+                override fun onNothingSelected(
+                    parent: AdapterView<*>?
+                ) {}
+
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+
+                    val list =
+                        if (categorySpinner.selectedItemPosition == 0) {
+                            basicFish
+                        } else {
+                            mystrasFish
+                        }
+
+                    selectedFish = list.getOrNull(position)
+                }
+            }
+    }
+        private fun configureWebView() {
 
         val settings = gameWebView.settings
 
@@ -669,4 +831,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-                    }
+}
