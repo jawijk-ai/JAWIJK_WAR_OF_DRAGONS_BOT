@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
-import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -58,6 +57,7 @@ class MainActivity : Activity() {
         webContainer = FrameLayout(this)
 
         webView = WebView(this)
+
         webContainer.addView(
             webView,
             FrameLayout.LayoutParams(
@@ -112,7 +112,6 @@ class MainActivity : Activity() {
         this.scanStatus.textSize = 11f
         this.scanStatus.setPadding(10, 5, 10, 5)
         this.scanStatus.isTextSelectable = true
-        this.scanStatus.maxLines = 20
 
         val resultScroll = ScrollView(this)
         resultScroll.addView(this.scanStatus)
@@ -127,6 +126,7 @@ class MainActivity : Activity() {
 
         val addButton = Button(this)
         addButton.text = "DODAJ ZEBRANY SUROWIEC"
+
         addButton.setOnClickListener {
             collected++
             updateStatus()
@@ -152,8 +152,6 @@ class MainActivity : Activity() {
         settings.javaScriptCanOpenWindowsAutomatically = true
         settings.setSupportMultipleWindows(true)
         settings.cacheMode = WebSettings.LOAD_DEFAULT
-        settings.allowContentAccess = true
-        settings.allowFileAccess = true
 
         CookieManager.getInstance().setAcceptCookie(true)
 
@@ -169,7 +167,6 @@ class MainActivity : Activity() {
                 url: String?
             ) {
                 super.onPageFinished(view, url)
-
                 status.text = "Strona załadowana"
             }
         }
@@ -200,7 +197,6 @@ class MainActivity : Activity() {
                 }
 
                 popup.webViewClient = WebViewClient()
-
                 popup.webChromeClient = this
 
                 popupWebView = popup
@@ -213,16 +209,20 @@ class MainActivity : Activity() {
                     )
                 )
 
-                val transport = resultMsg?.obj as? WebView.WebViewTransport
-                    ?: return false
+                val transport =
+                    resultMsg?.obj as? WebView.WebViewTransport
+                        ?: return false
 
-                transport.webView = popup
+                // Poprawione przypisanie WebView
+                transport.setWebView(popup)
+
                 resultMsg.sendToTarget()
 
                 return true
             }
 
             override fun onCloseWindow(window: WebView?) {
+
                 if (window != null) {
                     webContainer.removeView(window)
                     window.destroy()
@@ -235,15 +235,12 @@ class MainActivity : Activity() {
 
     private fun startAnalysis() {
 
-        if (running) {
-            return
-        }
+        if (running) return
 
         running = true
         scanCount = 0
 
         scanStatus.text = "Rozpoczynam analizę strony..."
-
         status.text = "ANALIZA AKTYWNA"
 
         handler.removeCallbacks(scanRunnable)
@@ -257,15 +254,12 @@ class MainActivity : Activity() {
         handler.removeCallbacks(scanRunnable)
 
         status.text = "ANALIZA ZATRZYMANA"
-
         scanStatus.text = "Analiza została zatrzymana."
     }
 
     private fun scanPage() {
 
-        if (!running) {
-            return
-        }
+        if (!running) return
 
         val javascript = """
             (function() {
@@ -279,7 +273,6 @@ class MainActivity : Activity() {
                 for (var i = 0; i < found.length; i++) {
 
                     var el = found[i];
-
                     var rect = el.getBoundingClientRect();
 
                     if (
@@ -293,7 +286,7 @@ class MainActivity : Activity() {
                         continue;
                     }
 
-                    var item = {
+                    elements.push({
                         tag: el.tagName,
                         text: (el.innerText || el.textContent || "").trim().substring(0, 80),
                         title: el.getAttribute("title") || "",
@@ -303,24 +296,10 @@ class MainActivity : Activity() {
                             ? el.className.substring(0, 100)
                             : "",
                         width: Math.round(rect.width),
-                        height: Math.round(rect.height),
-                        x: Math.round(rect.left),
-                        y: Math.round(rect.top)
-                    };
+                        height: Math.round(rect.height)
+                    });
 
-                    if (el.tagName === "CANVAS") {
-                        item.type = "CANVAS";
-                    }
-
-                    if (el.tagName === "SVG") {
-                        item.type = "SVG";
-                    }
-
-                    elements.push(item);
-
-                    if (elements.length >= 40) {
-                        break;
-                    }
+                    if (elements.length >= 40) break;
                 }
 
                 return {
@@ -341,7 +320,6 @@ class MainActivity : Activity() {
             try {
 
                 val data = JSONObject(result)
-
                 val count = data.optInt("count", 0)
                 val items = data.optJSONArray("items")
 
@@ -349,74 +327,43 @@ class MainActivity : Activity() {
 
                 scanCount++
 
-                output.append("SKAN: ")
-                output.append(scanCount)
-                output.append("\n")
+                output.append("SKAN: $scanCount\n")
+                output.append("WYKRYTE ELEMENTY: $count\n\n")
 
-                output.append("WYKRYTE ELEMENTY: ")
-                output.append(count)
-                output.append("\n\n")
-
-                if (items != null && items.length() > 0) {
+                if (items != null) {
 
                     for (i in 0 until items.length()) {
 
                         val item = items.getJSONObject(i)
 
-                        output.append("ELEMENT ")
-                        output.append(i + 1)
-                        output.append("\n")
-
-                        output.append("Typ: ")
-                        output.append(item.optString("tag"))
-                        output.append("\n")
-
-                        output.append("Tekst: ")
-                        output.append(item.optString("text"))
-                        output.append("\n")
-
-                        output.append("Nazwa: ")
-                        output.append(item.optString("title"))
-                        output.append("\n")
-
-                        output.append("Obraz: ")
-                        output.append(item.optString("alt"))
-                        output.append("\n")
-
-                        output.append("Adres: ")
-                        output.append(item.optString("src"))
-                        output.append("\n")
-
-                        output.append("Rozmiar: ")
-                        output.append(item.optInt("width"))
-                        output.append(" x ")
-                        output.append(item.optInt("height"))
-                        output.append("\n")
-
+                        output.append("ELEMENT ${i + 1}\n")
+                        output.append("Typ: ${item.optString("tag")}\n")
+                        output.append("Tekst: ${item.optString("text")}\n")
+                        output.append("Nazwa: ${item.optString("title")}\n")
+                        output.append("Obraz: ${item.optString("alt")}\n")
+                        output.append("Adres: ${item.optString("src")}\n")
+                        output.append(
+                            "Rozmiar: ${item.optInt("width")} x ${item.optInt("height")}\n"
+                        )
                         output.append("--------------------\n")
                     }
 
                 } else {
-
                     output.append("Nie znaleziono widocznych elementów.")
                 }
 
                 scanStatus.text = output.toString()
-
                 status.text = "ANALIZA: $scanCount | ELEMENTY: $count"
 
             } catch (e: Exception) {
 
-                scanStatus.text =
-                    "Błąd odczytu wyników: ${e.message}"
+                scanStatus.text = "Błąd odczytu: ${e.message}"
             }
         }
     }
 
     private fun updateStatus() {
-
-        status.text =
-            "ZEBRANE SUROWCE: $collected"
+        status.text = "ZEBRANE SUROWCE: $collected"
     }
 
     override fun onBackPressed() {
@@ -433,11 +380,8 @@ class MainActivity : Activity() {
         }
 
         if (webView.canGoBack()) {
-
             webView.goBack()
-
         } else {
-
             super.onBackPressed()
         }
     }
@@ -445,7 +389,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
 
         running = false
-
         handler.removeCallbacks(scanRunnable)
 
         popupWebView?.destroy()
