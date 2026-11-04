@@ -13,6 +13,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import org.json.JSONObject
+import org.json.JSONArray
 
 class MainActivity : Activity() {
 
@@ -24,17 +25,18 @@ class MainActivity : Activity() {
     private lateinit var categorySpinner: Spinner
 
     private var popupWebView: WebView? = null
+
     private var running = false
     private var collected = 0
     private var scanCount = 0
+    private var scanInProgress = false
 
     private val handler = Handler(Looper.getMainLooper())
 
     private val scanRunnable = object : Runnable {
         override fun run() {
-            if (running) {
+            if (running && !scanInProgress) {
                 scanPage()
-                handler.postDelayed(this, 30000)
             }
         }
     }
@@ -173,8 +175,7 @@ class MainActivity : Activity() {
 
         webView.loadUrl("https://www.warofdragons.com/")
     }
-
-    private fun configureWebView() {
+        private fun configureWebView() {
 
         val settings = webView.settings
 
@@ -285,6 +286,7 @@ class MainActivity : Activity() {
         }
 
         running = true
+        scanInProgress = false
         scanCount = 0
 
         scanStatus.text = "Rozpoczynam analizę..."
@@ -307,7 +309,7 @@ class MainActivity : Activity() {
 
     private fun scanPage() {
 
-        if (!running) return
+        if (!running || scanInProgress) return
 
         val activeWebView = popupWebView ?: webView
 
@@ -315,19 +317,22 @@ class MainActivity : Activity() {
 
         if (selectedFish.isEmpty()) return
 
+        scanInProgress = true
+
         val escapedFish = JSONObject.quote(selectedFish)
 
         val javascript = """
             (function() {
 
                 var target = $escapedFish;
-                var elements = [];
+                var targetLower = target.toLowerCase();
 
                 var found = document.querySelectorAll(
-                    'a, button, [role="button"], [onclick], img, svg, canvas, [style*="background"]'
+                    'a, button, [role="button"], [onclick], img, svg, [style*="background"]'
                 );
 
-                var targetLower = target.toLowerCase();
+                var matchedElement = null;
+                var matchedData = null;
 
                 for (var i = 0; i < found.length; i++) {
 
@@ -359,108 +364,125 @@ class MainActivity : Activity() {
                         text + " " + title + " " + alt + " " + src
                     ).toLowerCase();
 
-                    var matches = searchable.indexOf(targetLower) !== -1;
+                    if (searchable.indexOf(targetLower) !== -1) {
 
-                    if (matches) {
+                        matchedElement = el;
 
-                        var oldOutline = el.style.outline;
-                        var oldOffset = el.style.outlineOffset;
+                        matchedData = {
+                            tag: el.tagName,
+                            text: text.substring(0, 80),
+                            title: title,
+                            alt: alt,
+                            src: src
+                        };
 
-                        function flash(times) {
+                        break;
+                    }
+                }
 
-                            if (times <= 0) {
-                                el.style.outline = oldOutline;
-                                el.style.outlineOffset = oldOffset;
-                                return;
-                            }
+                var clicked = false;
 
-                            el.style.outline = "4px solid red";
-                            el.style.outlineOffset = "2px";
+                if (matchedElement) {
 
-                            setTimeout(function() {
+                    var rect = matchedElement.getBoundingClientRect();
 
-                                el.style.outline = "none";
+                    var x = rect.left + rect.width / 2;
+                    var y = rect.top + rect.height / 2;
 
-                                setTimeout(function() {
-                                    flash(times - 1);
-                                }, 150);
+                    function clickElement() {
 
-                            }, 200);
-                        }
+                        if (!document.contains(matchedElement)) return;
 
-                        flash(2);
+                        var clickEvents = [
+                            "mousedown",
+                            "mouseup",
+                            "click"
+                        ];
+
+                        clickEvents.forEach(function(type) {
+
+                            matchedElement.dispatchEvent(
+                                new MouseEvent(type, {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: window,
+                                    clientX: x,
+                                    clientY: y,
+                                    button: 0
+                                })
+                            );
+
+                        });
                     }
 
-                    elements.push({
-                        tag: el.tagName,
-                        text: text.substring(0, 80),
-                        title: title,
-                        alt: alt,
-                        src: src,
-                        matches: matches,
-                        width: Math.round(rect.width),
-                        height: Math.round(rect.height)
-                    });
+                    clickElement();
 
-                    if (elements.length >= 60) break;
+                    setTimeout(function() {
+                        clickElement();
+                    }, 150);
+
+                    clicked = true;
                 }
 
                 return {
-                    url: location.href,
                     target: target,
-                    count: elements.length,
-                    items: elements
+                    found: matchedElement !== null,
+                    clicked: clicked,
+                    item: matchedData
                 };
 
             })();
         """.trimIndent()
-
-        activeWebView.evaluateJavascript(javascript) { result ->
-
-            if (!running || result == null || result == "null") {
-                return@evaluateJavascript
-            }
+                activeWebView.evaluateJavascript(javascript) { result ->
 
             try {
 
-                val data = JSONObject(result)
+                if (!running || result == null || result == "null") {
+                    return@evaluateJavascript
+                }
 
-                val items = data.optJSONArray("items")
+                val data = JSONArray("[$result]")
+                    .getJSONObject(0)
 
                 scanCount++
 
-                var foundFish = false
+                val found = data.optBoolean("found")
 
                 val output = StringBuilder()
 
                 output.append("SKAN: $scanCount\n")
                 output.append("SZUKANA RYBA: $selectedFish\n")
-                output.append("KATEGORIA: ")
-                output.append(categorySpinner.selectedItem.toString())
-                output.append("\n\n")
+                output.append(
+                    "KATEGORIA: ${categorySpinner.selectedItem}\n\n"
+                )
 
-                if (items != null) {
+                if (found) {
 
-                    for (i in 0 until items.length()) {
+                    val item = data.optJSONObject("item")
 
-                        val item = items.getJSONObject(i)
+                    output.append("ZNALEZIONO RYBĘ!\n")
+                    output.append("Wykryto pasujący element.\n")
+                    output.append(
+                        "Typ: ${item?.optString("tag")}\n"
+                    )
+                    output.append(
+                        "Tekst: ${item?.optString("text")}\n"
+                    )
+                    output.append(
+                        "Nazwa: ${item?.optString("title")}\n"
+                    )
+                    output.append(
+                        "Obraz: ${item?.optString("alt")}\n"
+                    )
+                    output.append(
+                        "Adres: ${item?.optString("src")}\n"
+                    )
+                    output.append(
+                        "Wysłano dwa kliknięcia JavaScript.\n"
+                    )
 
-                        if (item.optBoolean("matches")) {
+                } else {
 
-                            foundFish = true
-
-                            output.append("ZNALEZIONO RYBĘ!\n")
-                            output.append("Typ: ${item.optString("tag")}\n")
-                            output.append("Tekst: ${item.optString("text")}\n")
-                            output.append("Nazwa: ${item.optString("title")}\n")
-                            output.append("Obraz: ${item.optString("alt")}\n")
-                            output.append("Adres: ${item.optString("src")}\n")
-                            output.append("--------------------\n")
-                        }
-                    }
-                }
-
-                if (!foundFish) {
                     output.append(
                         "Nie znaleziono pasującego elementu DOM.\n"
                     )
@@ -478,11 +500,20 @@ class MainActivity : Activity() {
 
                 scanStatus.text =
                     "Błąd analizy: ${e.message}"
+
+            } finally {
+
+                scanInProgress = false
+
+                if (running) {
+                    handler.postDelayed(scanRunnable, 1000)
+                }
             }
         }
     }
 
     private fun updateStatus() {
+
         status.text =
             "POŁOWY: $collected | SKANY: $scanCount"
     }
@@ -493,9 +524,11 @@ class MainActivity : Activity() {
         val popup = popupWebView
 
         if (popup != null) {
+
             webContainer.removeView(popup)
             popup.destroy()
             popupWebView = null
+
             return
         }
 
