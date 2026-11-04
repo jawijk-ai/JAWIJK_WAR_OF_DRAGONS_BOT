@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -13,20 +14,35 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import org.json.JSONObject
+import org.json.JSONArray
 
 class MainActivity : Activity() {
 
+    private data class FishResource(
+        val name: String,
+        val skill: String,
+        val locations: String,
+        val image: String
+    )
+
     private lateinit var webView: WebView
+    private lateinit var catalogWebView: WebView
     private lateinit var status: TextView
     private lateinit var scanStatus: TextView
     private lateinit var webContainer: FrameLayout
-    private lateinit var fishName: EditText
+    private lateinit var fishSpinner: Spinner
     private lateinit var categorySpinner: Spinner
 
     private var popupWebView: WebView? = null
     private var running = false
     private var collected = 0
     private var scanCount = 0
+
+    private val basicFish = mutableListOf<FishResource>()
+    private val mystrasFish = mutableListOf(
+        FishResource("Niebieska ikona w wodzie", "-", "Mystras", ""),
+        FishResource("Żółta ikona w wodzie", "-", "Mystras", "")
+    )
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -59,32 +75,44 @@ class MainActivity : Activity() {
         categorySpinner = Spinner(this)
 
         val categories = arrayOf(
-            "Ryby podstawowe",
+            "Ryby podstawowe – biblioteka",
             "Ryby Mystras"
         )
 
-        val adapter = ArrayAdapter(
+        categorySpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_item,
+            android.R.layout.simple_spinner_dropdown_item,
             categories
         )
 
-        adapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item
-        )
-
-        categorySpinner.adapter = adapter
         layout.addView(categorySpinner)
 
         val fishTitle = TextView(this)
-        fishTitle.text = "NAZWA RYBY DO WYKRYCIA:"
+        fishTitle.text = "WYBIERZ SUROWIEC:"
         layout.addView(fishTitle)
 
-        fishName = EditText(this)
-        fishName.hint = "Wpisz nazwę ryby"
-        fishName.textSize = 14f
-        fishName.setSingleLine(true)
-        layout.addView(fishName)
+        fishSpinner = Spinner(this)
+        fishSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            arrayOf("Ładowanie katalogu...")
+        )
+        layout.addView(fishSpinner)
+
+        categorySpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    updateFishList()
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
 
         webContainer = FrameLayout(this)
 
@@ -108,7 +136,6 @@ class MainActivity : Activity() {
         )
 
         val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
 
         val startButton = Button(this)
         startButton.text = "START"
@@ -122,47 +149,26 @@ class MainActivity : Activity() {
             stopAnalysis()
         }
 
-        buttons.addView(
-            startButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
-        buttons.addView(
-            stopButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
+        buttons.addView(startButton, LinearLayout.LayoutParams(0, -2, 1f))
+        buttons.addView(stopButton, LinearLayout.LayoutParams(0, -2, 1f))
         layout.addView(buttons)
 
-        // PRZYCISKI ZOOM
-
         val zoomButtons = LinearLayout(this)
-        zoomButtons.orientation = LinearLayout.HORIZONTAL
 
         val zoomOut = Button(this)
         zoomOut.text = "POMNIEJSZ −"
-
         zoomOut.setOnClickListener {
             (popupWebView ?: webView).zoomBy(0.8f)
         }
 
         val zoomIn = Button(this)
         zoomIn.text = "POWIĘKSZ +"
-
         zoomIn.setOnClickListener {
             (popupWebView ?: webView).zoomBy(1.25f)
         }
 
-        zoomButtons.addView(
-            zoomOut,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
-        zoomButtons.addView(
-            zoomIn,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
+        zoomButtons.addView(zoomOut, LinearLayout.LayoutParams(0, -2, 1f))
+        zoomButtons.addView(zoomIn, LinearLayout.LayoutParams(0, -2, 1f))
         layout.addView(zoomButtons)
 
         val resultTitle = TextView(this)
@@ -188,19 +194,28 @@ class MainActivity : Activity() {
 
         val countButton = Button(this)
         countButton.text = "DODAJ POTWIERDZONY POŁÓW"
-
         countButton.setOnClickListener {
             collected++
             updateStatus()
         }
-
         layout.addView(countButton)
+
+        // Ukryty WebView pobierający katalog z biblioteki gry.
+        catalogWebView = WebView(this)
+        catalogWebView.visibility = View.INVISIBLE
+
+        layout.addView(
+            catalogWebView,
+            LinearLayout.LayoutParams(1, 1)
+        )
 
         setContentView(layout)
 
         configureWebView()
+        configureCatalogWebView()
 
         webView.loadUrl("https://www.warofdragons.com/")
+        loadFishCatalog()
     }
 
     private fun configureWebView() {
@@ -231,11 +246,7 @@ class MainActivity : Activity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
-
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
+            override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 status.text = "Strona gry załadowana"
             }
@@ -294,27 +305,227 @@ class MainActivity : Activity() {
             }
 
             override fun onCloseWindow(window: WebView?) {
-
                 if (window != null) {
                     webContainer.removeView(window)
                     window.destroy()
                 }
-
                 popupWebView = null
             }
         }
+    }
+
+    private fun configureCatalogWebView() {
+
+        catalogWebView.settings.javaScriptEnabled = true
+        catalogWebView.settings.domStorageEnabled = true
+        catalogWebView.settings.loadsImagesAutomatically = true
+
+        catalogWebView.webViewClient = object : WebViewClient() {
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+
+                if (url?.contains("library/index.php") == true) {
+                    readFishCatalog()
+                }
+            }
+        }
+    }
+
+    private fun loadFishCatalog() {
+        status.text = "POBIERANIE KATALOGU RYB..."
+        catalogWebView.loadUrl(
+            "https://www.warofdragons.com/info/library/index.php?id=351&obj=cat"
+        )
+    }
+
+    private fun readFishCatalog() {
+
+        val javascript = """
+            (function() {
+                var tables = document.querySelectorAll("table");
+                var result = [];
+
+                for (var t = 0; t < tables.length; t++) {
+
+                    var table = tables[t];
+                    var rows = table.querySelectorAll("tr");
+
+                    var headerText = (
+                        table.innerText || ""
+                    ).toLowerCase();
+
+                    if (
+                        headerText.indexOf("skill level") === -1 &&
+                        headerText.indexOf("fisherman") === -1
+                    ) {
+                        continue;
+                    }
+
+                    for (var r = 0; r < rows.length; r++) {
+
+                        var cells = rows[r].querySelectorAll("td");
+
+                        if (cells.length < 2) continue;
+
+                        var images = cells[1].querySelectorAll("img");
+
+                        var name = "";
+                        var image = "";
+
+                        for (var i = 0; i < images.length; i++) {
+                            var img = images[i];
+
+                            name =
+                                img.getAttribute("alt") ||
+                                img.getAttribute("title") ||
+                                "";
+
+                            image =
+                                img.getAttribute("src") || "";
+
+                            if (name || image) break;
+                        }
+
+                        if (!name) {
+                            name = (
+                                cells[1].innerText || ""
+                            ).trim();
+                        }
+
+                        if (!name && !image) continue;
+
+                        var skill = (
+                            cells[0].innerText || ""
+                        ).trim();
+
+                        var locations = [];
+
+                        for (var c = 2; c < cells.length; c++) {
+                            var txt = (
+                                cells[c].innerText || ""
+                            ).trim();
+
+                            if (txt) locations.push(txt);
+                        }
+
+                        result.push({
+                            name: name,
+                            skill: skill,
+                            locations: locations.join(" / "),
+                            image: image
+                        });
+                    }
+                }
+
+                return {
+                    count: result.length,
+                    items: result
+                };
+            })();
+        """.trimIndent()
+
+        catalogWebView.evaluateJavascript(javascript) { result ->
+
+            try {
+
+                if (result == null || result == "null") {
+                    status.text = "Nie udało się odczytać katalogu."
+                    return@evaluateJavascript
+                }
+
+                val data = JSONObject(result)
+                val items = data.optJSONArray("items") ?: JSONArray()
+
+                basicFish.clear()
+
+                for (i in 0 until items.length()) {
+
+                    val item = items.getJSONObject(i)
+
+                    val name = item.optString("name").trim()
+
+                    if (name.isNotEmpty()) {
+                        basicFish.add(
+                            FishResource(
+                                name,
+                                item.optString("skill"),
+                                item.optString("locations"),
+                                item.optString("image")
+                            )
+                        )
+                    }
+                }
+
+                updateFishList()
+
+                status.text =
+                    if (basicFish.isNotEmpty()) {
+                        "KATALOG: ${basicFish.size} POZYCJI"
+                    } else {
+                        "Biblioteka otwarta, ale nie odczytano nazw ryb."
+                    }
+
+            } catch (e: Exception) {
+                status.text = "Błąd katalogu: ${e.message}"
+            }
+        }
+    }
+
+    private fun updateFishList() {
+
+        val selectedCategory = categorySpinner.selectedItemPosition
+
+        val names = if (selectedCategory == 0) {
+
+            if (basicFish.isEmpty()) {
+                listOf("Katalog jeszcze się ładuje")
+            } else {
+                basicFish.map {
+                    "${it.name} | poziom ${it.skill}"
+                }
+            }
+
+        } else {
+
+            mystrasFish.map { it.name }
+        }
+
+        fishSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            names
+        )
+    }
+
+    private fun getSelectedFishName(): String {
+
+        val category = categorySpinner.selectedItemPosition
+        val position = fishSpinner.selectedItemPosition
+
+        if (category == 0) {
+            if (position !in basicFish.indices) return ""
+            return basicFish[position].name
+        }
+
+        if (position !in mystrasFish.indices) return ""
+
+        return mystrasFish[position].name
     }
 
     private fun startAnalysis() {
 
         if (running) return
 
-        val selectedFish = fishName.text.toString().trim()
+        val selectedFish = getSelectedFishName()
 
-        if (selectedFish.isEmpty()) {
+        if (
+            selectedFish.isEmpty() ||
+            selectedFish == "Katalog jeszcze się ładuje"
+        ) {
             Toast.makeText(
                 this,
-                "Najpierw wpisz nazwę ryby",
+                "Wybierz surowiec z listy.",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -323,7 +534,9 @@ class MainActivity : Activity() {
         running = true
         scanCount = 0
 
-        scanStatus.text = "Rozpoczynam analizę..."
+        scanStatus.text =
+            "Rozpoczynam analizę: $selectedFish"
+
         status.text = "ANALIZA AKTYWNA"
 
         handler.removeCallbacks(scanRunnable)
@@ -333,7 +546,6 @@ class MainActivity : Activity() {
     private fun stopAnalysis() {
 
         running = false
-
         handler.removeCallbacks(scanRunnable)
 
         status.text = "ANALIZA ZATRZYMANA"
@@ -345,9 +557,24 @@ class MainActivity : Activity() {
         if (!running) return
 
         val activeWebView = popupWebView ?: webView
-        val selectedFish = fishName.text.toString().trim()
+        val selectedFish = getSelectedFishName()
 
         if (selectedFish.isEmpty()) return
+
+        // W Mystras wybór koloru ikony wymaga analizy obrazu mapy.
+        // Ten etap nie udaje jeszcze, że rozpoznaje kolory na Canvas/WebGL.
+        if (categorySpinner.selectedItemPosition == 1) {
+            scanCount++
+
+            scanStatus.text =
+                "SKAN: $scanCount\n" +
+                "TRYB: MYSTRAS\n" +
+                "WYBRANO: $selectedFish\n\n" +
+                "Oczekiwanie na moduł rozpoznawania ikon na mapie."
+
+            status.text = "SKAN: $scanCount | POŁOWY: $collected"
+            return
+        }
 
         val escapedFish = JSONObject.quote(selectedFish)
 
@@ -398,22 +625,16 @@ class MainActivity : Activity() {
 
                     if (matches) {
 
-                        var oldOutline = el.style.outline;
-                        var oldOffset = el.style.outlineOffset;
-
                         function flash(times) {
 
                             if (times <= 0) {
-                                el.style.outline = oldOutline;
-                                el.style.outlineOffset = oldOffset;
+                                el.style.outline = "";
                                 return;
                             }
 
                             el.style.outline = "4px solid red";
-                            el.style.outlineOffset = "2px";
 
                             setTimeout(function() {
-
                                 el.style.outline = "none";
 
                                 setTimeout(function() {
@@ -432,9 +653,7 @@ class MainActivity : Activity() {
                         title: title,
                         alt: alt,
                         src: src,
-                        matches: matches,
-                        width: Math.round(rect.width),
-                        height: Math.round(rect.height)
+                        matches: matches
                     });
 
                     if (elements.length >= 60) break;
@@ -443,113 +662,10 @@ class MainActivity : Activity() {
                 return {
                     url: location.href,
                     target: target,
-                    count: elements.length,
                     items: elements
                 };
 
             })();
         """.trimIndent()
 
-        activeWebView.evaluateJavascript(javascript) { result ->
-
-            if (!running || result == null || result == "null") {
-                return@evaluateJavascript
-            }
-
-            try {
-
-                val data = JSONObject(result)
-                val items = data.optJSONArray("items")
-
-                scanCount++
-
-                var foundFish = false
-
-                val output = StringBuilder()
-
-                output.append("SKAN: $scanCount\n")
-                output.append("SZUKANA RYBA: $selectedFish\n")
-                output.append("KATEGORIA: ")
-                output.append(categorySpinner.selectedItem.toString())
-                output.append("\n\n")
-
-                if (items != null) {
-
-                    for (i in 0 until items.length()) {
-
-                        val item = items.getJSONObject(i)
-
-                        if (item.optBoolean("matches")) {
-
-                            foundFish = true
-
-                            output.append("ZNALEZIONO RYBĘ!\n")
-                            output.append("Typ: ${item.optString("tag")}\n")
-                            output.append("Tekst: ${item.optString("text")}\n")
-                            output.append("Nazwa: ${item.optString("title")}\n")
-                            output.append("Obraz: ${item.optString("alt")}\n")
-                            output.append("Adres: ${item.optString("src")}\n")
-                            output.append("--------------------\n")
-                        }
-                    }
-                }
-
-                if (!foundFish) {
-                    output.append(
-                        "Nie znaleziono pasującego elementu DOM.\n"
-                    )
-                    output.append(
-                        "Ryba może być rysowana na mapie Canvas/WebGL."
-                    )
-                }
-
-                scanStatus.text = output.toString()
-
-                status.text =
-                    "SKAN: $scanCount | POŁOWY: $collected"
-
-            } catch (e: Exception) {
-
-                scanStatus.text =
-                    "Błąd analizy: ${e.message}"
-            }
-        }
-    }
-
-    private fun updateStatus() {
-        status.text =
-            "POŁOWY: $collected | SKANY: $scanCount"
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-
-        val popup = popupWebView
-
-        if (popup != null) {
-            webContainer.removeView(popup)
-            popup.destroy()
-            popupWebView = null
-            return
-        }
-
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
-    }
-
-    override fun onDestroy() {
-
-        running = false
-        handler.removeCallbacks(scanRunnable)
-
-        popupWebView?.destroy()
-        popupWebView = null
-
-        webView.destroy()
-
-        super.onDestroy()
-    }
-}
+        activeWebView.evaluateJavascript(javascript) { resu
