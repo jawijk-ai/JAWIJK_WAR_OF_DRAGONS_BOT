@@ -8,7 +8,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
@@ -78,6 +77,14 @@ class MainActivity : Activity() {
         }
 
         layout.addView(addButton)
+
+        val backButton = Button(this)
+        backButton.text = "POWRÓT DO GRY"
+        backButton.setOnClickListener {
+            showMainPage()
+        }
+
+        layout.addView(backButton)
 
         webContainer = FrameLayout(this)
 
@@ -163,8 +170,10 @@ class MainActivity : Activity() {
 
     private fun createPopup(resultMsg: Message): Boolean {
 
-        if (popupWebView != null) {
-            closePopup(popupWebView!!)
+        val oldPopup = popupWebView
+
+        if (oldPopup != null) {
+            closePopup(oldPopup)
         }
 
         val popup = WebView(this)
@@ -204,6 +213,17 @@ class MainActivity : Activity() {
         webView.bringToFront()
     }
 
+    private fun showMainPage() {
+
+        val popup = popupWebView
+
+        if (popup != null) {
+            popup.visibility = android.view.View.GONE
+            webView.visibility = android.view.View.VISIBLE
+            webView.bringToFront()
+        }
+    }
+
     private fun updateStatus() {
 
         status.text =
@@ -216,6 +236,28 @@ class MainActivity : Activity() {
 
         val popup = popupWebView
 
-        if (popup != null) {
+        if (popup != null &&
+            popup.visibility == android.view.View.VISIBLE
+        ) {
 
-            if
+            if (popup.canGoBack()) {
+                popup.goBack()
+            } else {
+                showMainPage()
+            }
+
+        } else if (webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    override fun onDestroy() {
+
+        popupWebView?.destroy()
+        webView.destroy()
+
+        super.onDestroy()
+    }
+}
