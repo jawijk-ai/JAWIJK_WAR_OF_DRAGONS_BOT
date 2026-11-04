@@ -332,6 +332,7 @@ class MainActivity : Activity() {
         val javascript = """
             (function() {
                 const result = [];
+
                 const tables = Array.from(
                     document.querySelectorAll("table")
                 );
@@ -569,69 +570,45 @@ class MainActivity : Activity() {
 
         val fish = selectedFish ?: return
 
-        val targetName = JSONObject.quote(fish.name)
-        val targetImage = JSONObject.quote(fish.image)
-
         val javascript = """
             (function() {
-                const targetName = $targetName.toLowerCase();
-                const targetImage = $targetImage.toLowerCase();
 
-                const elements = Array.from(
-                    document.querySelectorAll(
-                        "a, button, img, svg, canvas, " +
-                        "[role='button'], [title], [alt]"
-                    )
+                const images = Array.from(
+                    document.querySelectorAll("img")
                 );
 
-                let found = 0;
-                let images = 0;
-                let canvases = 0;
+                let marked = 0;
 
-                for (const el of elements) {
+                images.forEach(img => {
 
-                    const text = (
-                        (el.innerText || "") + " " +
-                        (el.getAttribute("title") || "") + " " +
-                        (el.getAttribute("alt") || "") + " " +
-                        (el.getAttribute("src") || "") + " " +
-                        (el.getAttribute("href") || "")
-                    ).toLowerCase();
-
-                    if (el.tagName === "IMG") images++;
-                    if (el.tagName === "CANVAS") canvases++;
-
-                    const nameMatch =
-                        targetName.length > 0 &&
-                        text.includes(targetName);
-
-                    const imageMatch =
-                        targetImage.length > 0 &&
-                        text.includes(targetImage);
-
-                    if (nameMatch || imageMatch) {
-                        found++;
-
-                        el.style.outline = "4px solid red";
-                        el.style.outlineOffset = "3px";
+                    if (
+                        img.naturalWidth < 10 ||
+                        img.naturalHeight < 10
+                    ) {
+                        return;
                     }
-                }
+
+                    img.style.outline = "4px solid red";
+                    img.style.outlineOffset = "2px";
+                    img.style.boxShadow = "0 0 8px red";
+
+                    marked++;
+                });
 
                 return JSON.stringify({
-                    found: found,
-                    images: images,
-                    canvases: canvases,
-                    title: document.title,
-                    url: location.href
+                    images: images.length,
+                    marked: marked
                 });
+
             })();
         """.trimIndent()
 
-        fun scanWindow(webView: WebView, windowName: String) {
+        fun scanWindow(webView: WebView, name: String) {
 
             webView.evaluateJavascript(javascript) { result ->
 
                 try {
+
                     if (result == null || result == "null") {
                         return@evaluateJavascript
                     }
@@ -642,25 +619,22 @@ class MainActivity : Activity() {
                     scanCount++
 
                     scanStatus.text =
-                        "OKNO: $windowName\n" +
-                        "Gra: ${data.optString("title")}\n" +
+                        "OKNO: $name\n" +
                         "Wybrany surowiec: ${fish.name}\n" +
-                        "Znalezione elementy: ${data.optInt("found")}\n" +
                         "Obrazki: ${data.optInt("images")}\n" +
-                        "Canvas: ${data.optInt("canvases")}\n" +
-                        "Liczba skanów: $scanCount"
+                        "Oznaczone: ${data.optInt("marked")}\n" +
+                        "Skan: $scanCount"
 
                 } catch (e: Exception) {
-                    scanStatus.text =
-                        "Błąd skanowania: ${e.message}"
+                    scanStatus.text = "Błąd: ${e.message}"
                 }
             }
         }
 
-        scanWindow(gameWebView, "GŁÓWNE OKNO")
+        scanWindow(gameWebView, "GŁÓWNE")
 
         popupWebView?.let {
-            scanWindow(it, "DODATKOWE OKNO")
+            scanWindow(it, "DODATKOWE")
         }
     }
 
@@ -668,11 +642,10 @@ class MainActivity : Activity() {
 
         val javascript = """
             (function() {
-                document.querySelectorAll("*").forEach(el => {
-                    if (el.style.outline.includes("red")) {
-                        el.style.outline = "";
-                        el.style.outlineOffset = "";
-                    }
+                document.querySelectorAll("img").forEach(el => {
+                    el.style.outline = "";
+                    el.style.outlineOffset = "";
+                    el.style.boxShadow = "";
                 });
             })();
         """.trimIndent()
