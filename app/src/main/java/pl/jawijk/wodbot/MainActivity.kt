@@ -1,3 +1,4 @@
+```kotlin
 package pl.jawijk.wodbot
 
 import android.app.Activity
@@ -21,18 +22,17 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var scanStatus: TextView
     private lateinit var webContainer: FrameLayout
-    private lateinit var fishName: EditText
     private lateinit var categorySpinner: Spinner
 
     private var popupWebView: WebView? = null
 
     private var running = false
-    private var collected = 0
     private var scanCount = 0
     private var scanInProgress = false
 
     private val handler = Handler(Looper.getMainLooper())
 
+    // Kolejne skanowanie co 20 sekund
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (running && !scanInProgress) {
@@ -77,16 +77,6 @@ class MainActivity : Activity() {
 
         categorySpinner.adapter = adapter
         layout.addView(categorySpinner)
-
-        val fishTitle = TextView(this)
-        fishTitle.text = "NAZWA RYBY DO WYKRYCIA:"
-        layout.addView(fishTitle)
-
-        fishName = EditText(this)
-        fishName.hint = "Wpisz nazwę ryby"
-        fishName.textSize = 14f
-        fishName.setSingleLine(true)
-        layout.addView(fishName)
 
         webContainer = FrameLayout(this)
 
@@ -159,23 +149,14 @@ class MainActivity : Activity() {
             )
         )
 
-        val countButton = Button(this)
-        countButton.text = "DODAJ POTWIERDZONY POŁÓW"
-
-        countButton.setOnClickListener {
-            collected++
-            updateStatus()
-        }
-
-        layout.addView(countButton)
-
         setContentView(layout)
 
         configureWebView()
 
         webView.loadUrl("https://www.warofdragons.com/")
     }
-        private fun configureWebView() {
+```kotlin
+    private fun configureWebView() {
 
         val settings = webView.settings
 
@@ -274,17 +255,6 @@ class MainActivity : Activity() {
 
         if (running) return
 
-        val selectedFish = fishName.text.toString().trim()
-
-        if (selectedFish.isEmpty()) {
-            Toast.makeText(
-                this,
-                "Najpierw wpisz nazwę ryby",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
         running = true
         scanInProgress = false
         scanCount = 0
@@ -305,133 +275,69 @@ class MainActivity : Activity() {
         status.text = "ANALIZA ZATRZYMANA"
         scanStatus.text = "Analiza została zatrzymana."
     }
-
     private fun scanPage() {
 
         if (!running || scanInProgress) return
 
         val activeWebView = popupWebView ?: webView
-        val selectedFish = fishName.text.toString().trim()
-
-        if (selectedFish.isEmpty()) return
 
         scanInProgress = true
-
-        val escapedFish = JSONObject.quote(selectedFish)
 
         val javascript = """
             (function() {
 
-                var target = $escapedFish;
-                var targetLower = target.toLowerCase();
+                var selects = document.querySelectorAll('select');
+                var filters = [];
 
-                var found = document.querySelectorAll(
-                    'a, button, [role="button"], [onclick], img, svg, [style*="background"]'
-                );
+                for (var i = 0; i < selects.length; i++) {
 
-                var matchedElement = null;
-                var matchedData = null;
+                    var select = selects[i];
 
-                for (var i = 0; i < found.length; i++) {
+                    var options = [];
 
-                    var el = found[i];
-                    var rect = el.getBoundingClientRect();
+                    for (var j = 0; j < select.options.length; j++) {
 
-                    if (
-                        rect.width <= 0 ||
-                        rect.height <= 0 ||
-                        rect.bottom <= 0 ||
-                        rect.right <= 0 ||
-                        rect.top >= window.innerHeight ||
-                        rect.left >= window.innerWidth
-                    ) {
-                        continue;
-                    }
-
-                    var text = (
-                        el.innerText ||
-                        el.textContent ||
-                        ""
-                    ).trim();
-
-                    var title = el.getAttribute("title") || "";
-                    var alt = el.getAttribute("alt") || "";
-                    var src = el.getAttribute("src") || "";
-
-                    var searchable = (
-                        text + " " + title + " " + alt + " " + src
-                    ).toLowerCase();
-
-                    if (searchable.indexOf(targetLower) !== -1) {
-
-                        matchedElement = el;
-
-                        matchedData = {
-                            tag: el.tagName,
-                            text: text.substring(0, 80),
-                            title: title,
-                            alt: alt,
-                            src: src
-                        };
-
-                        break;
-                    }
-                }
-
-                var clicked = false;
-
-                if (matchedElement) {
-
-                    var rect = matchedElement.getBoundingClientRect();
-
-                    var x = rect.left + rect.width / 2;
-                    var y = rect.top + rect.height / 2;
-
-                    function clickElement() {
-
-                        if (!document.contains(matchedElement)) return;
-
-                        var clickEvents = [
-                            "mousedown",
-                            "mouseup",
-                            "click"
-                        ];
-
-                        clickEvents.forEach(function(type) {
-
-                            matchedElement.dispatchEvent(
-                                new MouseEvent(type, {
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: window,
-                                    clientX: x,
-                                    clientY: y,
-                                    button: 0
-                                })
-                            );
-
+                        options.push({
+                            text: select.options[j].text,
+                            value: select.options[j].value,
+                            selected: select.options[j].selected
                         });
                     }
 
-                    clickElement();
+                    filters.push({
+                        name: select.name || "",
+                        id: select.id || "",
+                        value: select.value || "",
+                        options: options
+                    });
+                }
 
-                    setTimeout(function() {
-                        clickElement();
-                    }, 150);
+                var canvases = document.querySelectorAll('canvas');
 
-                    clicked = true;
+                var canvasInfo = [];
+
+                for (var k = 0; k < canvases.length; k++) {
+
+                    var rect = canvases[k].getBoundingClientRect();
+
+                    canvasInfo.push({
+                        width: canvases[k].width,
+                        height: canvases[k].height,
+                        screenWidth: Math.round(rect.width),
+                        screenHeight: Math.round(rect.height)
+                    });
                 }
 
                 return {
-                    target: target,
-                    found: matchedElement !== null,
-                    clicked: clicked,
-                    item: matchedData
+                    selects: filters,
+                    canvasCount: canvases.length,
+                    canvases: canvasInfo
                 };
 
             })();
         """.trimIndent()
-                activeWebView.evaluateJavascript(javascript) { result ->
+
+        activeWebView.evaluateJavascript(javascript) { result ->
 
             try {
 
@@ -444,55 +350,97 @@ class MainActivity : Activity() {
 
                 scanCount++
 
-                val found = data.optBoolean("found")
-
                 val output = StringBuilder()
 
                 output.append("SKAN: $scanCount\n")
-                output.append("SZUKANA RYBA: $selectedFish\n")
-                output.append(
-                    "KATEGORIA: ${categorySpinner.selectedItem}\n\n"
-                )
+                output.append("ODSTĘP: 20 SEKUND\n\n")
 
-                if (found) {
+                val selects = data.optJSONArray("selects")
 
-                    val item = data.optJSONObject("item")
+                if (selects != null && selects.length() > 0) {
 
-                    output.append("ZNALEZIONO RYBĘ!\n")
-                    output.append("Wykryto pasujący element.\n")
-                    output.append(
-                        "Typ: ${item?.optString("tag")}\n"
-                    )
-                    output.append(
-                        "Tekst: ${item?.optString("text")}\n"
-                    )
-                    output.append(
-                        "Nazwa: ${item?.optString("title")}\n"
-                    )
-                    output.append(
-                        "Obraz: ${item?.optString("alt")}\n"
-                    )
-                    output.append(
-                        "Adres: ${item?.optString("src")}\n"
-                    )
-                    output.append(
-                        "Wysłano dwa kliknięcia JavaScript.\n"
-                    )
+                    output.append("LISTY ROZWIJANE GRY:\n\n")
+
+                    for (i in 0 until selects.length()) {
+
+                        val filter = selects.getJSONObject(i)
+
+                        output.append("LISTA ${i + 1}\n")
+                        output.append(
+                            "Nazwa: ${filter.optString("name")}\n"
+                        )
+                        output.append(
+                            "ID: ${filter.optString("id")}\n"
+                        )
+                        output.append(
+                            "Wybrana wartość: ${filter.optString("value")}\n"
+                        )
+
+                        val options = filter.optJSONArray("options")
+
+                        if (options != null) {
+
+                            output.append("Dostępne poziomy:\n")
+
+                            for (j in 0 until options.length()) {
+
+                                val option = options.getJSONObject(j)
+
+                                val selected =
+                                    if (option.optBoolean("selected")) {
+                                        " <-- WYBRANE"
+                                    } else {
+                                        ""
+                                    }
+
+                                output.append(
+                                    "- ${option.optString("text")} " +
+                                    "(wartość: ${option.optString("value")})" +
+                                    selected + "\n"
+                                )
+                            }
+                        }
+
+                        output.append("\n")
+                    }
 
                 } else {
 
                     output.append(
-                        "Nie znaleziono pasującego elementu DOM.\n"
-                    )
-                    output.append(
-                        "Możliwe, że ryba jest rysowana na mapie Canvas."
+                        "Nie znaleziono list rozwijanych HTML.\n"
                     )
                 }
 
+                val canvasCount = data.optInt("canvasCount")
+
+                output.append("\nOBSZAR GRY:\n")
+                output.append("Liczba Canvas: $canvasCount\n")
+
+                val canvases = data.optJSONArray("canvases")
+
+                if (canvases != null) {
+
+                    for (i in 0 until canvases.length()) {
+
+                        val canvas = canvases.getJSONObject(i)
+
+                        output.append(
+                            "Canvas ${i + 1}: " +
+                            "${canvas.optInt("width")} x " +
+                            "${canvas.optInt("height")}\n"
+                        )
+                    }
+                }
+
+                output.append(
+                    "\nTo jest skan diagnostyczny. " +
+                    "Wykrywanie kółek zostanie dodane po ustaleniu " +
+                    "sposobu rysowania znaczników przez grę."
+                )
+
                 scanStatus.text = output.toString()
 
-                status.text =
-                    "SKAN: $scanCount | POŁOWY: $collected"
+                status.text = "ANALIZA AKTYWNA | SKAN: $scanCount"
 
             } catch (e: Exception) {
 
@@ -504,16 +452,11 @@ class MainActivity : Activity() {
                 scanInProgress = false
 
                 if (running) {
-                    handler.postDelayed(scanRunnable, 1000)
+                    handler.removeCallbacks(scanRunnable)
+                    handler.postDelayed(scanRunnable, 20000)
                 }
             }
         }
-    }
-
-    private fun updateStatus() {
-
-        status.text =
-            "POŁOWY: $collected | SKANY: $scanCount"
     }
 
     @Suppress("DEPRECATION")
@@ -540,6 +483,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
 
         running = false
+
         handler.removeCallbacks(scanRunnable)
 
         popupWebView?.destroy()
