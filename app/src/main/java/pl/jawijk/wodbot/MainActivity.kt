@@ -1,4 +1,3 @@
-```kotlin
 package pl.jawijk.wodbot
 
 import android.app.Activity
@@ -490,4 +489,3 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 }
-```
