@@ -55,7 +55,6 @@ class MainActivity : Activity() {
         layout.addView(status)
 
         webContainer = FrameLayout(this)
-
         webView = WebView(this)
 
         webContainer.addView(
@@ -111,7 +110,9 @@ class MainActivity : Activity() {
         this.scanStatus.text = "Oczekiwanie na skanowanie..."
         this.scanStatus.textSize = 11f
         this.scanStatus.setPadding(10, 5, 10, 5)
-        this.scanStatus.isTextSelectable = true
+
+        // POPRAWKA BŁĘDU KOMPILACJI
+        this.scanStatus.setTextIsSelectable(true)
 
         val resultScroll = ScrollView(this)
         resultScroll.addView(this.scanStatus)
@@ -188,8 +189,7 @@ class MainActivity : Activity() {
                 popup.settings.javaScriptCanOpenWindowsAutomatically = true
                 popup.settings.setSupportMultipleWindows(true)
 
-                CookieManager.getInstance()
-                    .setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptCookie(true)
 
                 if (android.os.Build.VERSION.SDK_INT >= 21) {
                     CookieManager.getInstance()
@@ -213,9 +213,7 @@ class MainActivity : Activity() {
                     resultMsg?.obj as? WebView.WebViewTransport
                         ?: return false
 
-                // Poprawione przypisanie WebView
                 transport.setWebView(popup)
-
                 resultMsg.sendToTarget()
 
                 return true
@@ -263,7 +261,6 @@ class MainActivity : Activity() {
 
         val javascript = """
             (function() {
-
                 var elements = [];
 
                 var found = document.querySelectorAll(
@@ -292,9 +289,6 @@ class MainActivity : Activity() {
                         title: el.getAttribute("title") || "",
                         alt: el.getAttribute("alt") || "",
                         src: el.getAttribute("src") || "",
-                        className: typeof el.className === "string"
-                            ? el.className.substring(0, 100)
-                            : "",
                         width: Math.round(rect.width),
                         height: Math.round(rect.height)
                     });
@@ -307,7 +301,6 @@ class MainActivity : Activity() {
                     count: elements.length,
                     items: elements
                 };
-
             })();
         """.trimIndent()
 
@@ -366,16 +359,15 @@ class MainActivity : Activity() {
         status.text = "ZEBRANE SUROWCE: $collected"
     }
 
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
 
         val popup = popupWebView
 
         if (popup != null) {
-
             webContainer.removeView(popup)
             popup.destroy()
             popupWebView = null
-
             return
         }
 
