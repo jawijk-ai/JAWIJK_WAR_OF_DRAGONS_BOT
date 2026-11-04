@@ -13,10 +13,11 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.FrameLayout
-import org.json.JSONTokener
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import org.json.JSONObject
 
 class MainActivity : Activity() {
 
@@ -26,7 +27,6 @@ class MainActivity : Activity() {
     private lateinit var webContainer: FrameLayout
 
     private var popupWebView: WebView? = null
-
     private var running = false
     private var collected = 0
     private var scanCount = 0
@@ -37,7 +37,6 @@ class MainActivity : Activity() {
     private val scanTask = object : Runnable {
         override fun run() {
             if (!running) return
-
             analyzeScreen()
             handler.postDelayed(this, 3000)
         }
@@ -94,34 +93,32 @@ class MainActivity : Activity() {
         scanStatus.text = "Oczekiwanie na skanowanie..."
         scanStatus.textSize = 11f
         scanStatus.setPadding(10, 5, 10, 5)
-        scanStatus.maxLines = 35
         scanStatus.isTextSelectable = true
 
+        val scroll = ScrollView(this)
+        scroll.addView(scanStatus)
+
         layout.addView(
-            scanStatus,
+            scroll,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                220
+                180
             )
         )
 
         val addButton = Button(this)
         addButton.text = "DODAJ ZEBRANY SUROWIEC"
-
         addButton.setOnClickListener {
             collected++
             updateStatus()
         }
-
         layout.addView(addButton)
 
         val backButton = Button(this)
         backButton.text = "POWRÓT DO GRY"
-
         backButton.setOnClickListener {
             showMainPage()
         }
-
         layout.addView(backButton)
 
         webContainer = FrameLayout(this)
@@ -149,18 +146,15 @@ class MainActivity : Activity() {
         setContentView(layout)
 
         updateStatus()
-
         webView.loadUrl("https://www.warofdragons.com/")
     }
 
     private fun startAnalysis() {
-
         if (running) return
 
         running = true
         scanCount = 0
-
-        scanStatus.text = "Analiza ikon uruchomiona."
+        scanStatus.text = "Uruchomiono analizę co 3 sekundy."
 
         handler.removeCallbacks(scanTask)
         handler.post(scanTask)
@@ -169,208 +163,99 @@ class MainActivity : Activity() {
     }
 
     private fun stopAnalysis() {
-
         running = false
-
         handler.removeCallbacks(scanTask)
-
         scanStatus.text = "Analiza zatrzymana."
-
         updateStatus()
     }
 
     private fun analyzeScreen() {
-
         if (scanInProgress) return
 
         val activeView = getActiveWebView()
-
         scanInProgress = true
 
         val script = """
-        (function() {
+            (function() {
+                var results = [];
+                var seen = {};
 
-            const results = [];
-            const seen = new Set();
+                function addItem(el, type, url) {
+                    if (!el) return;
 
-            function visible(el) {
+                    var rect = el.getBoundingClientRect();
+                    var style = window.getComputedStyle(el);
 
-                const r = el.getBoundingClientRect();
-                const s = getComputedStyle(el);
+                    if (
+                        rect.width < 15 ||
+                        rect.height < 15 ||
+                        rect.width > 600 ||
+                        rect.height > 600 ||
+                        style.display === 'none' ||
+                        style.visibility === 'hidden' ||
+                        style.opacity === '0' ||
+                        rect.bottom <= 0 ||
+                        rect.right <= 0 ||
+                        rect.top >= window.innerHeight ||
+                        rect.left >= window.innerWidth
+                    ) {
+                        return;
+                    }
 
-                return (
-                    r.width > 10 &&
-                    r.height > 10 &&
-                    s.display !== 'none' &&
-                    s.visibility !== 'hidden' &&
-                    s.opacity !== '0' &&
-                    r.bottom > 0 &&
-                    r.right > 0 &&
-                    r.top < window.innerHeight &&
-                    r.left < window.innerWidth
-                );
-            }
+                    var key = type + '|' + url + '|' +
+                        Math.round(rect.x) + '|' +
+                        Math.round(rect.y);
 
-            function addElement(el, sourceType, sourceUrl) {
+                    if (seen[key]) return;
+                    seen[key] = true;
 
-                if (!el || !visible(el)) return;
+                    results.push({
+                        type: type,
+                        url: url || '',
+                        alt: el.alt || '',
+                        title: el.title || '',
+                        width: Math.round(rect.width),
+                        height: Math.round(rect.height),
+                        x: Math.round(rect.x),
+                        y: Math.round(rect.y)
+                    });
+                }
 
-                const r = el.getBoundingClientRect();
-                const s = getComputedStyle(el);
-
-                const width = Math.round(r.width);
-                const height = Math.round(r.height);
-
-                if (width < 15 || height < 15) return;
-
-                const ratio = width / height;
-
-                // Interesują nas głównie ikony,
-                // a nie duże zdjęcia i banery.
-                if (
-                    width > 500 ||
-                    height > 500 ||
-                    ratio < 0.45 ||
-                    ratio > 2.2
-                ) return;
-
-                const url = sourceUrl || '';
-
-                const key = [
-                    sourceType,
-                    url,
-                    Math.round(r.x),
-                    Math.round(r.y),
-                    width,
-                    height
-                ].join('|');
-
-                if (seen.has(key)) return;
-
-                seen.add(key);
-
-                results.push({
-
-                    type: sourceType,
-
-                    tag: el.tagName,
-
-                    url: url.substring(0, 350),
-
-                    alt: el.alt || '',
-
-                    title: el.title || '',
-
-                    className: String(
-                        el.className || ''
-                    ).substring(0, 100),
-
-                    x: Math.round(r.x),
-
-                    y: Math.round(r.y),
-
-                    width: width,
-
-                    height: height
-
-                });
-            }
-
-            function scanDocument(doc) {
-
-                if (!doc || !doc.body) return;
-
-                // Obrazki IMG
-                doc.querySelectorAll('img').forEach(function(el) {
-
-                    addElement(
+                document.querySelectorAll('img').forEach(function(el) {
+                    addItem(
                         el,
                         'IMG',
                         el.currentSrc || el.src || ''
                     );
-
                 });
 
-                // Elementy SVG
-                doc.querySelectorAll('svg').forEach(function(el) {
-
-                    addElement(
-                        el,
-                        'SVG',
-                        ''
-                    );
-
+                document.querySelectorAll('svg').forEach(function(el) {
+                    addItem(el, 'SVG', '');
                 });
 
-                // Elementy z obrazkiem w tle
-                doc.querySelectorAll('*').forEach(function(el) {
+                document.querySelectorAll('canvas').forEach(function(el) {
+                    addItem(el, 'CANVAS', '');
+                });
 
-                    const style = getComputedStyle(el);
-                    const bg = style.backgroundImage;
+                document.querySelectorAll('*').forEach(function(el) {
+                    var bg = window.getComputedStyle(el).backgroundImage;
 
                     if (bg && bg !== 'none') {
-
-                        addElement(
-                            el,
-                            'BACKGROUND',
-                            bg
-                        );
+                        addItem(el, 'BACKGROUND', bg);
                     }
-
-                    // Elementy, które mogą być ikonami
-                    if (
-                        el.tagName === 'CANVAS' ||
-                        el.getAttribute('role') === 'button' ||
-                        el.hasAttribute('onclick')
-                    ) {
-
-                        addElement(
-                            el,
-                            el.tagName,
-                            ''
-                        );
-                    }
-
                 });
 
-                // Dostępne ramki iframe
-                doc.querySelectorAll('iframe').forEach(function(frame) {
-
-                    try {
-
-                        const frameDoc =
-                            frame.contentDocument ||
-                            frame.contentWindow.document;
-
-                        scanDocument(frameDoc);
-
-                    } catch(e) {
-
-                        // Nie można odczytać obcej domeny.
-                    }
-
+                results.sort(function(a, b) {
+                    return (a.width * a.height) -
+                           (b.width * b.height);
                 });
 
-            }
-
-            scanDocument(document);
-
-            results.sort(function(a, b) {
-
-                return (a.width * a.height) -
-                       (b.width * b.height);
-
-            });
-
-            return JSON.stringify({
-
-                total: results.length,
-
-                images: results.slice(0, 100)
-
-            });
-
-        })();
+                return {
+                    total: results.length,
+                    images: results.slice(0, 80),
+                    page: document.location.href
+                };
+            })();
         """.trimIndent()
 
         activeView.evaluateJavascript(script) { result ->
@@ -381,92 +266,76 @@ class MainActivity : Activity() {
 
             scanCount++
 
-            val decoded = try {
-
-                JSONTokener(result ?: "null").nextValue()
-                    as? String ?: ""
-
-            } catch (e: Exception) {
-
-                ""
-            }
-
-            if (decoded.isBlank()) {
-
-                scanStatus.text =
-                    "Skan: $scanCount\n" +
-                    "Nie udało się odczytać wyników."
-
-                updateStatus()
-                return@evaluateJavascript
-            }
-
             try {
+                if (result == null || result == "null") {
+                    scanStatus.text = "Skan $scanCount: brak odpowiedzi strony."
+                    updateStatus()
+                    return@evaluateJavascript
+                }
 
-                val json = org.json.JSONObject(decoded)
-
+                val json = JSONObject(result)
                 val total = json.optInt("total", 0)
                 val images = json.optJSONArray("images")
 
                 val output = StringBuilder()
 
-                output.append("Skan: $scanCount\n")
-                output.append("Wykryte elementy: $total\n\n")
+                output.append("SKAN: ")
+                    .append(scanCount)
+                    .append("\n")
+
+                output.append("WYKRYTE ELEMENTY: ")
+                    .append(total)
+                    .append("\n\n")
 
                 if (images == null || images.length() == 0) {
-
-                    output.append(
-                        "Nie znaleziono ikon.\n"
-                    )
-
-                    output.append(
-                        "Możliwe, że gra używa Canvas lub WebGL."
-                    )
-
+                    output.append("Nie znaleziono obrazków ani ikon.")
                 } else {
-
                     for (i in 0 until images.length()) {
-
                         val item = images.getJSONObject(i)
 
-                        output.append("ELEMENT ${i + 1}\n")
+                        output.append("ELEMENT ")
+                            .append(i + 1)
+                            .append("\n")
 
-                        output.append(
-                            "Typ: ${item.optString("type")}\n"
-                        )
+                        output.append("Typ: ")
+                            .append(item.optString("type"))
+                            .append("\n")
 
-                        output.append(
-                            "Rozmiar: " +
-                            "${item.optInt("width")} x " +
-                            "${item.optInt("height")}\n"
-                        )
+                        output.append("Rozmiar: ")
+                            .append(item.optInt("width"))
+                            .append(" x ")
+                            .append(item.optInt("height"))
+                            .append("\n")
 
-                        output.append(
-                            "Pozycja: " +
-                            "${item.optInt("x")}, " +
-                            "${item.optInt("y")}\n"
-                        )
+                        output.append("Pozycja: ")
+                            .append(item.optInt("x"))
+                            .append(", ")
+                            .append(item.optInt("y"))
+                            .append("\n")
 
                         val alt = item.optString("alt")
                         if (alt.isNotBlank()) {
-                            output.append("Alt: $alt\n")
+                            output.append("Opis: ")
+                                .append(alt)
+                                .append("\n")
                         }
 
                         val url = item.optString("url")
                         if (url.isNotBlank()) {
-                            output.append("Adres: $url\n")
+                            output.append("Adres: ")
+                                .append(url)
+                                .append("\n")
                         }
 
                         output.append("\n")
                     }
                 }
 
-                scanStatus.text = output.toString().take(6000)
+                scanStatus.text = output.toString()
 
             } catch (e: Exception) {
-
                 scanStatus.text =
-                    "Błąd odczytu wyników:\n${e.message}"
+                    "Błąd odczytu skanowania:\n${e.message}\n\nWynik:\n$result"
             }
 
             updateStatus()
@@ -474,50 +343,38 @@ class MainActivity : Activity() {
     }
 
     private fun getActiveWebView(): WebView {
-
         val popup = popupWebView
 
-        if (popup != null &&
-            popup.visibility == View.VISIBLE
-        ) {
-            return popup
+        return if (popup != null && popup.visibility == View.VISIBLE) {
+            popup
+        } else {
+            webView
         }
-
-        return webView
     }
 
     private fun configureWebView(view: WebView) {
-
         view.settings.apply {
-
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
-
             loadsImagesAutomatically = true
-
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
-
             useWideViewPort = true
             loadWithOverviewMode = true
-
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-
             mixedContentMode =
                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         }
 
         CookieManager.getInstance().apply {
-
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(view, true)
         }
 
         view.webViewClient = object : WebViewClient() {
-
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: android.webkit.WebResourceRequest
@@ -527,14 +384,12 @@ class MainActivity : Activity() {
         }
 
         view.webChromeClient = object : WebChromeClient() {
-
             override fun onCreateWindow(
                 view: WebView,
                 isDialog: Boolean,
                 isUserGesture: Boolean,
                 resultMsg: Message
             ): Boolean {
-
                 return createPopup(resultMsg)
             }
 
@@ -545,7 +400,6 @@ class MainActivity : Activity() {
     }
 
     private fun createPopup(resultMsg: Message): Boolean {
-
         popupWebView?.let {
             closePopup(it)
         }
@@ -575,9 +429,7 @@ class MainActivity : Activity() {
     }
 
     private fun closePopup(window: WebView) {
-
         webContainer.removeView(window)
-
         window.stopLoading()
         window.destroy()
 
@@ -589,57 +441,40 @@ class MainActivity : Activity() {
     }
 
     private fun showMainPage() {
-
-        val popup = popupWebView
-
-        if (popup != null) {
-
-            popup.visibility = View.GONE
-
+        popupWebView?.let {
+            it.visibility = View.GONE
             webView.visibility = View.VISIBLE
             webView.bringToFront()
         }
     }
 
     private fun updateStatus() {
-
         status.text =
             "Zebrane: $collected | Analiza: " +
-            if (running) "AKTYWNA" else "WYŁĄCZONA"
+                if (running) "AKTYWNA" else "WYŁĄCZONA"
     }
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-
         val popup = popupWebView
 
-        if (popup != null &&
-            popup.visibility == View.VISIBLE
-        ) {
-
+        if (popup != null && popup.visibility == View.VISIBLE) {
             if (popup.canGoBack()) {
                 popup.goBack()
             } else {
                 showMainPage()
             }
-
         } else if (webView.canGoBack()) {
-
             webView.goBack()
-
         } else {
-
             super.onBackPressed()
         }
     }
 
     override fun onDestroy() {
-
         stopAnalysis()
-
         popupWebView?.destroy()
         webView.destroy()
-
         super.onDestroy()
     }
 }
