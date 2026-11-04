@@ -31,6 +31,8 @@ class MainActivity : Activity() {
 
     private lateinit var categorySpinner: Spinner
     private lateinit var resourceSpinner: Spinner
+    private lateinit var timeSpinner: Spinner
+
     private lateinit var scanStatus: TextView
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
@@ -44,7 +46,10 @@ class MainActivity : Activity() {
     private var scanning = false
     private var scanCount = 0
 
-    private val gameUrl = "https://www.warofdragons.com/"
+    private var scanInterval = 30000L
+
+    private val gameUrl =
+        "https://www.warofdragons.com/"
 
     private val catalogUrl =
         "https://warofdragons.com/info/library/index.php?id=351&obj=cat"
@@ -52,10 +57,17 @@ class MainActivity : Activity() {
     private var popupWebView: WebView? = null
 
     private val scanRunnable = object : Runnable {
+
         override fun run() {
+
             if (!scanning) return
+
             scanPage()
-            handler.postDelayed(this, 30000)
+
+            handler.postDelayed(
+                this,
+                scanInterval
+            )
         }
     }
 
@@ -104,101 +116,45 @@ class MainActivity : Activity() {
         resourceSpinner = Spinner(this)
         root.addView(resourceSpinner)
 
-        val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
+        // WYBÓR CZASU ANALIZY
 
-        startButton = Button(this)
-        startButton.text = "START"
+        val timeTitle = TextView(this)
+        timeTitle.text = "CZAS MIĘDZY ANALIZAMI:"
+        timeTitle.textSize = 13f
+        timeTitle.setTextColor(Color.BLACK)
+        timeTitle.setPadding(10, 6, 10, 2)
 
-        stopButton = Button(this)
-        stopButton.text = "STOP"
-        stopButton.isEnabled = false
+        root.addView(timeTitle)
 
-        buttons.addView(
-            startButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
+        timeSpinner = Spinner(this)
+
+        val timeOptions = listOf(
+            "1 sekunda",
+            "5 sekund",
+            "10 sekund",
+            "15 sekund",
+            "30 sekund",
+            "60 sekund",
+            "2 minuty",
+            "5 minut"
         )
 
-        buttons.addView(
-            stopButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
+        timeSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            timeOptions
         )
 
-        root.addView(buttons)
+        timeSpinner.setSelection(4)
 
-        startButton.setOnClickListener {
-            startAnalysis()
-        }
+        root.addView(timeSpinner)
 
-        stopButton.setOnClickListener {
-            stopAnalysis()
-        }
-
-        val zoomButtons = LinearLayout(this)
-        zoomButtons.orientation = LinearLayout.HORIZONTAL
-
-        val zoomOut = Button(this)
-        zoomOut.text = "A−"
-
-        val zoomIn = Button(this)
-        zoomIn.text = "A+"
-
-        zoomButtons.addView(
-            zoomOut,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
-        zoomButtons.addView(
-            zoomIn,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
-        root.addView(zoomButtons)
-
-        scanStatus = TextView(this)
-        scanStatus.text = "Ładowanie biblioteki rybaka..."
-        scanStatus.textSize = 12f
-        scanStatus.setPadding(10, 8, 10, 8)
-        scanStatus.setTextColor(Color.BLACK)
-        scanStatus.setTextIsSelectable(true)
-
-        root.addView(scanStatus)
-
-        webContainer = FrameLayout(this)
-
-        root.addView(
-            webContainer,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
-
-        gameWebView = WebView(this)
-
-        webContainer.addView(
-            gameWebView,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        setContentView(root)
-
-        zoomOut.setOnClickListener {
-            gameWebView.zoomBy(0.8f)
-        }
-
-        zoomIn.setOnClickListener {
-            gameWebView.zoomBy(1.25f)
-        }
-
-        categorySpinner.onItemSelectedListener =
+        timeSpinner.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
 
-                override fun onNothingSelected(parent: AdapterView<*>?) {}
+                override fun onNothingSelected(
+                    parent: AdapterView<*>?
+                ) {}
 
                 override fun onItemSelected(
                     parent: AdapterView<*>?,
@@ -206,37 +162,12 @@ class MainActivity : Activity() {
                     position: Int,
                     id: Long
                 ) {
-                    if (position == 0) {
-                        showFishList(basicFish)
-                    } else {
-                        showFishList(mystrasFish)
-                    }
-                }
-            }
 
-        resourceSpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-
-                override fun onNothingSelected(parent: AdapterView<*>?) {}
-
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                ) {
-                    val list =
-                        if (categorySpinner.selectedItemPosition == 0) {
-                            basicFish
-                        } else {
-                            mystrasFish
-                        }
-
-                    selectedFish = list.getOrNull(position)
-                }
-            }
-    }
-        private fun configureWebView() {
+                    scanInterval = when (position) {
+                        0 -> 1000L
+                        1 -> 5000L
+                        2 -> 10000L
+                        private fun configureWebView() {
 
         val settings = gameWebView.settings
 
@@ -254,6 +185,7 @@ class MainActivity : Activity() {
         settings.displayZoomControls = false
 
         CookieManager.getInstance().setAcceptCookie(true)
+
         CookieManager.getInstance()
             .setAcceptThirdPartyCookies(gameWebView, true)
 
@@ -297,6 +229,7 @@ class MainActivity : Activity() {
             }
 
             override fun onCloseWindow(window: WebView?) {
+
                 window?.let {
                     webContainer.removeView(it)
                     it.destroy()
@@ -331,6 +264,7 @@ class MainActivity : Activity() {
 
         val javascript = """
             (function() {
+
                 const result = [];
 
                 const tables = Array.from(
@@ -340,6 +274,7 @@ class MainActivity : Activity() {
                 let fishTable = null;
 
                 for (const table of tables) {
+
                     const headers = Array.from(
                         table.querySelectorAll(
                             "tr:first-child th, tr:first-child td"
@@ -360,6 +295,7 @@ class MainActivity : Activity() {
                 }
 
                 if (!fishTable) {
+
                     return JSON.stringify({
                         error: "Nie znaleziono tabeli Fisherman resources",
                         items: []
@@ -371,13 +307,15 @@ class MainActivity : Activity() {
                 );
 
                 for (const row of rows.slice(1)) {
+
                     const cells = Array.from(
                         row.querySelectorAll("td")
                     );
 
                     if (cells.length < 4) continue;
 
-                    const skill = (cells[0].innerText || "").trim();
+                    const skill =
+                        (cells[0].innerText || "").trim();
 
                     if (
                         !skill ||
@@ -415,13 +353,16 @@ class MainActivity : Activity() {
                     }
 
                     result.push({
+
                         name: name,
                         skill: skill,
+
                         locations:
                             "Magmar: " +
                             (cells[2].innerText || "").trim() +
                             " | Ludzie: " +
                             (cells[3].innerText || "").trim(),
+
                         image: img ? img.src : ""
                     });
                 }
@@ -430,18 +371,25 @@ class MainActivity : Activity() {
                     error: "",
                     items: result
                 });
+
             })();
         """.trimIndent()
 
         view.evaluateJavascript(javascript) { result ->
 
             try {
+
                 if (result == null || result == "null") {
-                    scanStatus.text = "Biblioteka nie zwróciła danych."
+
+                    scanStatus.text =
+                        "Biblioteka nie zwróciła danych."
+
                     return@evaluateJavascript
                 }
 
-                val decoded = JSONArray("[$result]").getString(0)
+                val decoded =
+                    JSONArray("[$result]").getString(0)
+
                 val json = JSONObject(decoded)
 
                 val items = json.optJSONArray("items")
@@ -449,7 +397,9 @@ class MainActivity : Activity() {
                 basicFish.clear()
 
                 if (items != null) {
+
                     for (i in 0 until items.length()) {
+
                         val item = items.getJSONObject(i)
 
                         basicFish.add(
@@ -467,12 +417,16 @@ class MainActivity : Activity() {
 
                 scanStatus.text =
                     if (basicFish.isEmpty()) {
+
                         "Nie pobrano ryb: ${json.optString("error")}"
+
                     } else {
+
                         "Pobrano ryby: ${basicFish.size}"
                     }
 
             } catch (e: Exception) {
+
                 scanStatus.text =
                     "Błąd biblioteki: ${e.message}"
             }
@@ -514,8 +468,11 @@ class MainActivity : Activity() {
     private fun showFishList(list: List<FishResource>) {
 
         val names = if (list.isEmpty()) {
+
             listOf("Brak dostępnych surowców")
+
         } else {
+
             list.map {
                 "${it.name} – poziom ${it.skill}"
             }
@@ -529,10 +486,14 @@ class MainActivity : Activity() {
 
         selectedFish = list.firstOrNull()
     }
-        private fun startAnalysis() {
+
+    private fun startAnalysis() {
 
         if (selectedFish == null) {
-            scanStatus.text = "Najpierw wybierz surowiec."
+
+            scanStatus.text =
+                "Najpierw wybierz surowiec."
+
             return
         }
 
@@ -549,12 +510,16 @@ class MainActivity : Activity() {
 
         scanPage()
 
-        handler.postDelayed(scanRunnable, 30000)
+        handler.postDelayed(
+            scanRunnable,
+            scanInterval
+        )
     }
 
     private fun stopAnalysis() {
 
         scanning = false
+
         handler.removeCallbacks(scanRunnable)
 
         startButton.isEnabled = true
@@ -565,8 +530,7 @@ class MainActivity : Activity() {
         scanStatus.text =
             "Analiza zatrzymana. Liczba skanów: $scanCount"
     }
-
-    private fun scanPage() {
+        private fun scanPage() {
 
         val fish = selectedFish ?: return
 
@@ -583,7 +547,9 @@ class MainActivity : Activity() {
 
                     if (
                         img.naturalWidth < 10 ||
-                        img.naturalHeight < 10
+                        img.naturalHeight < 10 ||
+                        img.getBoundingClientRect().width <= 0 ||
+                        img.getBoundingClientRect().height <= 0
                     ) {
                         return;
                     }
@@ -603,7 +569,10 @@ class MainActivity : Activity() {
             })();
         """.trimIndent()
 
-        fun scanWindow(webView: WebView, name: String) {
+        fun scanWindow(
+            webView: WebView,
+            name: String
+        ) {
 
             webView.evaluateJavascript(javascript) { result ->
 
@@ -613,7 +582,9 @@ class MainActivity : Activity() {
                         return@evaluateJavascript
                     }
 
-                    val decoded = JSONArray("[$result]").getString(0)
+                    val decoded =
+                        JSONArray("[$result]").getString(0)
+
                     val data = JSONObject(decoded)
 
                     scanCount++
@@ -623,10 +594,13 @@ class MainActivity : Activity() {
                         "Wybrany surowiec: ${fish.name}\n" +
                         "Obrazki: ${data.optInt("images")}\n" +
                         "Oznaczone: ${data.optInt("marked")}\n" +
+                        "Czas między analizami: ${scanInterval / 1000} s\n" +
                         "Skan: $scanCount"
 
                 } catch (e: Exception) {
-                    scanStatus.text = "Błąd: ${e.message}"
+
+                    scanStatus.text =
+                        "Błąd: ${e.message}"
                 }
             }
         }
@@ -642,16 +616,24 @@ class MainActivity : Activity() {
 
         val javascript = """
             (function() {
+
                 document.querySelectorAll("img").forEach(el => {
+
                     el.style.outline = "";
                     el.style.outlineOffset = "";
                     el.style.boxShadow = "";
+
                 });
+
             })();
         """.trimIndent()
 
         gameWebView.evaluateJavascript(javascript, null)
-        popupWebView?.evaluateJavascript(javascript, null)
+
+        popupWebView?.evaluateJavascript(
+            javascript,
+            null
+        )
     }
 
     override fun onBackPressed() {
@@ -659,11 +641,13 @@ class MainActivity : Activity() {
         val popup = popupWebView
 
         if (popup != null && popup.canGoBack()) {
+
             popup.goBack()
             return
         }
 
         if (gameWebView.canGoBack()) {
+
             gameWebView.goBack()
             return
         }
@@ -674,6 +658,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
 
         scanning = false
+
         handler.removeCallbacksAndMessages(null)
 
         popupWebView?.destroy()
@@ -684,4 +669,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-}
+                    }
