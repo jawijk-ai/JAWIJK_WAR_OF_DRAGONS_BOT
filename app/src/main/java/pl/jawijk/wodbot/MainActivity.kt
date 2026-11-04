@@ -92,4 +92,52 @@ class MainActivity : Activity() {
 
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView,
+            setAcceptThirdPartyCookies(webView, true)
+        }
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest
+            ): Boolean {
+                return false
+            }
+        }
+
+        webView.webChromeClient = WebChromeClient()
+
+        layout.addView(
+            webView,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
+
+        setContentView(layout)
+
+        webView.loadUrl("https://www.warofdragons.com/")
+    }
+
+    private fun updateStatus() {
+        status.text =
+            "Zebrane: $collected | Status: " +
+            if (running) "START" else "STOP"
+    }
+
+    override fun onBackPressed() {
+        if (::webView.isInitialized && webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    override fun onDestroy() {
+        if (::webView.isInitialized) {
+            webView.destroy()
+        }
+        super.onDestroy()
+    }
+}
