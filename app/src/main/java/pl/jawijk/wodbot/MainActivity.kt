@@ -397,10 +397,6 @@ class MainActivity : Activity() {
         } catch (_: Exception) {}
     }
 
-    // -----------------------------------------
-    // BIBLIOTEKA PODSTAWOWA
-    // -----------------------------------------
-
     private fun loadBasicCatalog() {
 
         scanStatus.text = "Pobieranie ryb podstawowych..."
@@ -579,17 +575,9 @@ class MainActivity : Activity() {
         }
     }
 
-    // -----------------------------------------
-    // BIBLIOTEKA MYSTRAS
-    // -----------------------------------------
-
     private fun loadMystrasCatalog() {
 
         scanStatus.text = "Pobieranie danych Mystras..."
-
-        catalogView.loadUrl(
-            "https://warofdragons.com/info/library/index.php?id=470&obj=cat"
-        )
 
         catalogView.webViewClient = object : WebViewClient() {
 
@@ -602,6 +590,10 @@ class MainActivity : Activity() {
                 }
             }
         }
+
+        catalogView.loadUrl(
+            "https://warofdragons.com/info/library/index.php?id=470&obj=cat"
+        )
     }
 
     private fun extractMystrasFish() {
@@ -676,7 +668,6 @@ class MainActivity : Activity() {
 
                         if (cells.length < 2) return;
 
-                        // Kolumna Resource jest zwykle trzecią kolumną.
                         let resourceCell = cells.length >= 3
                             ? cells[2]
                             : cells[cells.length - 1];
@@ -738,7 +729,6 @@ class MainActivity : Activity() {
                     )
                 }
 
-                // Znana nazwa ryby Mystras z oficjalnego opisu.
                 if (mystrasFish.none {
                         it.name.equals(
                             "Mystras Serpentfish",
@@ -780,31 +770,7 @@ class MainActivity : Activity() {
             }
         }
     }
-        private fun loadMystrasCatalog() {
-
-        scanStatus.text = "Pobieranie danych Mystras..."
-
-        catalogView.webViewClient = object : WebViewClient() {
-
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                if (url?.contains("id=470") == true) {
-                    extractMystrasFish()
-                }
-            }
-        }
-
-        catalogView.loadUrl(
-            "https://warofdragons.com/info/library/index.php?id=470&obj=cat"
-        )
-        }
-           // -----------------------------------------
-    // WYBÓR RYB
-    // -----------------------------------------
-
-    private fun showFishList() {
+        private fun showFishList() {
 
         if (!::fishSpinner.isInitialized) return
 
@@ -857,10 +823,6 @@ class MainActivity : Activity() {
             }
     }
 
-    // -----------------------------------------
-    // START / STOP
-    // -----------------------------------------
-
     private fun startAnalysis() {
 
         if (analysisRunning) return
@@ -885,10 +847,6 @@ class MainActivity : Activity() {
 
         scanStatus.text = "Analiza zatrzymana."
     }
-
-    // -----------------------------------------
-    // SKANOWANIE JEDNEGO OBRAZKA
-    // -----------------------------------------
 
     private fun scanPage() {
 
@@ -951,13 +909,11 @@ class MainActivity : Activity() {
                     });
                 }
 
-                // Usuwamy poprzednie oznaczenie.
                 images.forEach(function(img) {
                     img.style.removeProperty("outline");
                     img.style.removeProperty("box-shadow");
                 });
 
-                // Wybieramy dokładnie jeden obraz.
                 let index = Math.floor(
                     Math.random() * images.length
                 );
@@ -1066,10 +1022,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // -----------------------------------------
-    // CZYSZCZENIE OZNACZEŃ
-    // -----------------------------------------
-
     private fun clearHighlights() {
 
         val js = """
@@ -1088,10 +1040,6 @@ class MainActivity : Activity() {
         gameWebView.evaluateJavascript(js, null)
         popupWebView?.evaluateJavascript(js, null)
     }
-
-    // -----------------------------------------
-    // COFANIE
-    // -----------------------------------------
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
@@ -1115,10 +1063,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // -----------------------------------------
-    // ZAMYKANIE APLIKACJI
-    // -----------------------------------------
-
     override fun onDestroy() {
 
         analysisRunning = false
@@ -1135,4 +1079,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-} 
+}
