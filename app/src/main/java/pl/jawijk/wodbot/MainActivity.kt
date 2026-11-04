@@ -11,11 +11,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import android.widget.*
 import org.json.JSONObject
 
 class MainActivity : Activity() {
@@ -24,6 +20,8 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var scanStatus: TextView
     private lateinit var webContainer: FrameLayout
+    private lateinit var fishName: EditText
+    private lateinit var categorySpinner: Spinner
 
     private var popupWebView: WebView? = null
     private var running = false
@@ -36,7 +34,7 @@ class MainActivity : Activity() {
         override fun run() {
             if (running) {
                 scanPage()
-                handler.postDelayed(this, 3000)
+                handler.postDelayed(this, 30000)
             }
         }
     }
@@ -46,15 +44,50 @@ class MainActivity : Activity() {
 
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(8, 8, 8, 8)
+        layout.setPadding(6, 6, 6, 6)
 
         status = TextView(this)
         status.text = "JAWIJK WOD – GOTOWY"
         status.textSize = 16f
-        status.setPadding(10, 10, 10, 10)
+        status.setPadding(8, 8, 8, 8)
         layout.addView(status)
 
+        val categoryTitle = TextView(this)
+        categoryTitle.text = "KATEGORIA SUROWCÓW:"
+        layout.addView(categoryTitle)
+
+        categorySpinner = Spinner(this)
+
+        val categories = arrayOf(
+            "Ryby podstawowe",
+            "Ryby Mystras"
+        )
+
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            categories
+        )
+
+        adapter.setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item
+        )
+
+        categorySpinner.adapter = adapter
+        layout.addView(categorySpinner)
+
+        val fishTitle = TextView(this)
+        fishTitle.text = "NAZWA RYBY DO WYKRYCIA:"
+        layout.addView(fishTitle)
+
+        fishName = EditText(this)
+        fishName.hint = "Wpisz nazwę ryby"
+        fishName.textSize = 14f
+        fishName.singleLine = true
+        layout.addView(fishName)
+
         webContainer = FrameLayout(this)
+
         webView = WebView(this)
 
         webContainer.addView(
@@ -78,13 +111,15 @@ class MainActivity : Activity() {
         buttons.orientation = LinearLayout.HORIZONTAL
 
         val startButton = Button(this)
-        startButton.text = "START ANALIZY"
+        startButton.text = "START"
+
         startButton.setOnClickListener {
             startAnalysis()
         }
 
         val stopButton = Button(this)
-        stopButton.text = "STOP ANALIZY"
+        stopButton.text = "STOP"
+
         stopButton.setOnClickListener {
             stopAnalysis()
         }
@@ -102,36 +137,35 @@ class MainActivity : Activity() {
         layout.addView(buttons)
 
         val resultTitle = TextView(this)
-        resultTitle.text = "WYKRYTE IKONY I OBRAZY:"
-        resultTitle.setPadding(10, 5, 10, 5)
+        resultTitle.text = "WYNIKI ANALIZY:"
         layout.addView(resultTitle)
 
         scanStatus = TextView(this)
-        scanStatus.text = "Oczekiwanie na skanowanie..."
+        scanStatus.text = "Oczekiwanie na START..."
         scanStatus.textSize = 11f
-        scanStatus.setPadding(10, 5, 10, 5)
+        scanStatus.setPadding(5, 5, 5, 5)
         scanStatus.setTextIsSelectable(true)
 
-        val resultScroll = ScrollView(this)
-        resultScroll.addView(scanStatus)
+        val scroll = ScrollView(this)
+        scroll.addView(scanStatus)
 
         layout.addView(
-            resultScroll,
+            scroll,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                180
+                130
             )
         )
 
-        val addButton = Button(this)
-        addButton.text = "DODAJ ZEBRANY SUROWIEC"
+        val countButton = Button(this)
+        countButton.text = "DODAJ POTWIERDZONY POŁÓW"
 
-        addButton.setOnClickListener {
+        countButton.setOnClickListener {
             collected++
             updateStatus()
         }
 
-        layout.addView(addButton)
+        layout.addView(countButton)
 
         setContentView(layout)
 
@@ -151,17 +185,10 @@ class MainActivity : Activity() {
         settings.javaScriptCanOpenWindowsAutomatically = true
         settings.setSupportMultipleWindows(true)
 
-        // Dopasowanie strony do ekranu
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
 
-        // Zoom
-        settings.setSupportZoom(true)
-        settings.builtInZoomControls = true
-        settings.displayZoomControls = false
-
         settings.cacheMode = WebSettings.LOAD_DEFAULT
-        settings.textZoom = 100
 
         CookieManager.getInstance().setAcceptCookie(true)
 
@@ -177,7 +204,7 @@ class MainActivity : Activity() {
                 url: String?
             ) {
                 super.onPageFinished(view, url)
-                status.text = "Strona załadowana"
+                status.text = "Strona gry załadowana"
             }
         }
 
@@ -194,16 +221,11 @@ class MainActivity : Activity() {
 
                 popup.settings.javaScriptEnabled = true
                 popup.settings.domStorageEnabled = true
-                popup.settings.databaseEnabled = true
                 popup.settings.loadsImagesAutomatically = true
                 popup.settings.javaScriptCanOpenWindowsAutomatically = true
                 popup.settings.setSupportMultipleWindows(true)
-
                 popup.settings.useWideViewPort = true
                 popup.settings.loadWithOverviewMode = true
-                popup.settings.setSupportZoom(true)
-                popup.settings.builtInZoomControls = true
-                popup.settings.displayZoomControls = false
 
                 CookieManager.getInstance().setAcceptCookie(true)
 
@@ -251,10 +273,22 @@ class MainActivity : Activity() {
 
         if (running) return
 
+        val selectedFish = fishName.text.toString().trim()
+
+        if (selectedFish.isEmpty()) {
+            Toast.makeText(
+                this,
+                "Najpierw wpisz nazwę ryby",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         running = true
         scanCount = 0
 
-        scanStatus.text = "Rozpoczynam analizę strony..."
+        scanStatus.text = "Rozpoczynam analizę..."
+
         status.text = "ANALIZA AKTYWNA"
 
         handler.removeCallbacks(scanRunnable)
@@ -277,14 +311,23 @@ class MainActivity : Activity() {
 
         val activeWebView = popupWebView ?: webView
 
+        val selectedFish = fishName.text.toString().trim()
+
+        if (selectedFish.isEmpty()) return
+
+        val escapedFish = JSONObject.quote(selectedFish)
+
         val javascript = """
             (function() {
 
+                var target = $escapedFish;
                 var elements = [];
 
                 var found = document.querySelectorAll(
                     'a, button, [role="button"], [onclick], img, svg, canvas, [style*="background"]'
                 );
+
+                var targetLower = target.toLowerCase();
 
                 for (var i = 0; i < found.length; i++) {
 
@@ -302,20 +345,69 @@ class MainActivity : Activity() {
                         continue;
                     }
 
+                    var text = (
+                        el.innerText ||
+                        el.textContent ||
+                        ""
+                    ).trim();
+
+                    var title = el.getAttribute("title") || "";
+                    var alt = el.getAttribute("alt") || "";
+                    var src = el.getAttribute("src") || "";
+
+                    var searchable = (
+                        text + " " + title + " " + alt + " " + src
+                    ).toLowerCase();
+
+                    var matches = searchable.indexOf(targetLower) !== -1;
+
+                    if (matches) {
+
+                        var oldOutline = el.style.outline;
+                        var oldOffset = el.style.outlineOffset;
+
+                        function flash(times) {
+
+                            if (times <= 0) {
+                                el.style.outline = oldOutline;
+                                el.style.outlineOffset = oldOffset;
+                                return;
+                            }
+
+                            el.style.outline = "4px solid red";
+                            el.style.outlineOffset = "2px";
+
+                            setTimeout(function() {
+
+                                el.style.outline = "none";
+
+                                setTimeout(function() {
+                                    flash(times - 1);
+                                }, 150);
+
+                            }, 200);
+                        }
+
+                        flash(2);
+                    }
+
                     elements.push({
                         tag: el.tagName,
-                        text: (el.innerText || el.textContent || "").trim().substring(0, 80),
-                        title: el.getAttribute("title") || "",
-                        alt: el.getAttribute("alt") || "",
-                        src: el.getAttribute("src") || "",
+                        text: text.substring(0, 80),
+                        title: title,
+                        alt: alt,
+                        src: src,
+                        matches: matches,
                         width: Math.round(rect.width),
                         height: Math.round(rect.height)
                     });
 
-                    if (elements.length >= 40) break;
+                    if (elements.length >= 60) break;
                 }
 
                 return {
+                    url: location.href,
+                    target: target,
                     count: elements.length,
                     items: elements
                 };
@@ -332,15 +424,20 @@ class MainActivity : Activity() {
             try {
 
                 val data = JSONObject(result)
-                val count = data.optInt("count", 0)
-                val items = data.optJSONArray("items")
 
-                val output = StringBuilder()
+                val items = data.optJSONArray("items")
 
                 scanCount++
 
+                var foundFish = false
+
+                val output = StringBuilder()
+
                 output.append("SKAN: $scanCount\n")
-                output.append("WYKRYTE ELEMENTY: $count\n\n")
+                output.append("SZUKANA RYBA: $selectedFish\n")
+                output.append("KATEGORIA: ")
+                output.append(categorySpinner.selectedItem.toString())
+                output.append("\n\n")
 
                 if (items != null) {
 
@@ -348,34 +445,46 @@ class MainActivity : Activity() {
 
                         val item = items.getJSONObject(i)
 
-                        output.append("ELEMENT ${i + 1}\n")
-                        output.append("Typ: ${item.optString("tag")}\n")
-                        output.append("Tekst: ${item.optString("text")}\n")
-                        output.append("Nazwa: ${item.optString("title")}\n")
-                        output.append("Obraz: ${item.optString("alt")}\n")
-                        output.append("Adres: ${item.optString("src")}\n")
-                        output.append(
-                            "Rozmiar: ${item.optInt("width")} x ${item.optInt("height")}\n"
-                        )
-                        output.append("--------------------\n")
-                    }
+                        if (item.optBoolean("matches")) {
 
-                } else {
-                    output.append("Nie znaleziono widocznych elementów.")
+                            foundFish = true
+
+                            output.append("ZNALEZIONO RYBĘ!\n")
+                            output.append("Typ: ${item.optString("tag")}\n")
+                            output.append("Tekst: ${item.optString("text")}\n")
+                            output.append("Nazwa: ${item.optString("title")}\n")
+                            output.append("Obraz: ${item.optString("alt")}\n")
+                            output.append("Adres: ${item.optString("src")}\n")
+                            output.append("--------------------\n")
+                        }
+                    }
+                }
+
+                if (!foundFish) {
+                    output.append(
+                        "Nie znaleziono pasującego elementu DOM.\n"
+                    )
+                    output.append(
+                        "Możliwe, że ryba jest rysowana na mapie Canvas."
+                    )
                 }
 
                 scanStatus.text = output.toString()
-                status.text = "ANALIZA: $scanCount | ELEMENTY: $count"
+
+                status.text =
+                    "SKAN: $scanCount | POŁOWY: $collected"
 
             } catch (e: Exception) {
 
-                scanStatus.text = "Błąd odczytu: ${e.message}"
+                scanStatus.text =
+                    "Błąd analizy: ${e.message}"
             }
         }
     }
 
     private fun updateStatus() {
-        status.text = "ZEBRANE SUROWCE: $collected"
+        status.text =
+            "POŁOWY: $collected | SKANY: $scanCount"
     }
 
     @Suppress("DEPRECATION")
