@@ -695,3 +695,32 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        val popup = popupWebView
+
+        if (popup != null && popup.canGoBack()) {
+            popup.goBack()
+            return
+        }
+
+        if (gameWebView.canGoBack()) {
+            gameWebView.goBack()
+            return
+        }
+
+        super.onBackPressed()
+    }
+
+    override fun onDestroy() {
+
+        scanning = false
+        handler.removeCallbacksAndMessages(null)
+
+        popupWebView?.destroy()
+        popupWebView = null
+
+        gameWebView.stopLoading()
+        gameWebView.destroy()
+
+        super.onDestroy()
+    }
+}
