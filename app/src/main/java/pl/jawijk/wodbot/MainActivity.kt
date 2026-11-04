@@ -2,8 +2,10 @@ package pl.jawijk.wodbot
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Message
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -37,9 +39,8 @@ class MainActivity : Activity() {
 
         status = TextView(this)
         status.text = "Zebrane: 0 | Status: STOP"
-        status.textSize = 14f
         status.setTextColor(Color.BLACK)
-        status.setPadding(10, 2, 10, 5)
+        status.setPadding(10, 5, 10, 5)
         layout.addView(status)
 
         val buttons = LinearLayout(this)
@@ -47,7 +48,6 @@ class MainActivity : Activity() {
 
         val startButton = Button(this)
         startButton.text = "START"
-
         startButton.setOnClickListener {
             running = true
             updateStatus()
@@ -55,7 +55,6 @@ class MainActivity : Activity() {
 
         val stopButton = Button(this)
         stopButton.text = "STOP"
-
         stopButton.setOnClickListener {
             running = false
             updateStatus()
@@ -75,7 +74,6 @@ class MainActivity : Activity() {
 
         val addButton = Button(this)
         addButton.text = "DODAJ SUROWIEC"
-
         addButton.setOnClickListener {
             collected++
             updateStatus()
@@ -86,28 +84,19 @@ class MainActivity : Activity() {
         webView = WebView(this)
 
         webView.settings.apply {
-
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
-
             loadsImagesAutomatically = true
-
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
-
             useWideViewPort = true
             loadWithOverviewMode = true
-
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
-
             mixedContentMode =
                 WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-
-            userAgentString =
-                WebSettings.getDefaultUserAgent(this@MainActivity)
         }
 
         CookieManager.getInstance().apply {
@@ -119,19 +108,68 @@ class MainActivity : Activity() {
 
             override fun shouldOverrideUrlLoading(
                 view: WebView,
-                request: android.webkit.WebResourceRequest
+                request: WebResourceRequest
             ): Boolean {
                 return false
             }
         }
 
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
 
-        webView.isFocusable = true
-        webView.isFocusableInTouchMode = true
-        webView.isClickable = true
+            override fun onCreateWindow(
+                view: WebView,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message
+            ): Boolean {
 
-        webView.setInitialScale(75)
+                val popup = WebView(this@MainActivity)
+
+                popup.settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    javaScriptCanOpenWindowsAutomatically = true
+                    setSupportMultipleWindows(true)
+                }
+
+                CookieManager.getInstance().apply {
+                    setAcceptCookie(true)
+                    setAcceptThirdPartyCookies(popup, true)
+                }
+
+                popup.webViewClient = object : WebViewClient() {
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): Boolean {
+
+                        webView.loadUrl(request.url.toString())
+                        return true
+                    }
+
+                    override fun onPageFinished(
+                        view: WebView,
+                        url: String
+                    ) {
+                        super.onPageFinished(view, url)
+
+                        if (url.startsWith("http")) {
+                            webView.loadUrl(url)
+                            view.destroy()
+                        }
+                    }
+                }
+
+                val transport =
+                    resultMsg.obj as WebView.WebViewTransport
+
+                transport.webView = popup
+                resultMsg.sendToTarget()
+
+                return true
+            }
+        }
 
         layout.addView(
             webView,
@@ -145,19 +183,16 @@ class MainActivity : Activity() {
         setContentView(layout)
 
         webView.requestFocus()
-
         webView.loadUrl("https://www.warofdragons.com/")
     }
 
     private fun updateStatus() {
-
         status.text =
             "Zebrane: $collected | Status: " +
             if (running) "START" else "STOP"
     }
 
     override fun onBackPressed() {
-
         if (::webView.isInitialized && webView.canGoBack()) {
             webView.goBack()
         } else {
@@ -166,11 +201,9 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-
         if (::webView.isInitialized) {
             webView.destroy()
         }
-
         super.onDestroy()
     }
 }
