@@ -14,7 +14,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import android.graphics.Color
-import android.graphics.Rect
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -44,6 +43,7 @@ class MainActivity : Activity() {
 
     private var scanInterval = 30000L
     private var analysisRunning = false
+    private var scanInProgress = false
 
     private var selectedCategory = "Ryby podstawowe"
     private var selectedFish = ""
@@ -52,11 +52,11 @@ class MainActivity : Activity() {
 
     private val scanRunnable = object : Runnable {
         override fun run() {
+
             if (!analysisRunning) return
+            if (scanInProgress) return
 
             scanPage()
-
-            handler.postDelayed(this, scanInterval)
         }
     }
 
@@ -156,6 +156,7 @@ class MainActivity : Activity() {
                     position: Int,
                     id: Long
                 ) {
+
                     val values = longArrayOf(
                         1000L,
                         5000L,
@@ -174,7 +175,7 @@ class MainActivity : Activity() {
                             "Odstęp analizy: ${times[position]}"
                     }
 
-                    if (analysisRunning) {
+                    if (analysisRunning && !scanInProgress) {
                         handler.removeCallbacks(scanRunnable)
                         handler.post(scanRunnable)
                     }
@@ -304,7 +305,6 @@ class MainActivity : Activity() {
         settings.displayZoomControls = false
 
         settings.cacheMode = WebSettings.LOAD_DEFAULT
-
         settings.allowFileAccess = true
         settings.allowContentAccess = true
 
@@ -321,8 +321,7 @@ class MainActivity : Activity() {
                 url: String?
             ) {
                 super.onPageFinished(view, url)
-
-                scanStatus.text = "Strona załadowana."
+                scanStatus.text = "Strona gry załadowana."
             }
 
             override fun shouldOverrideUrlLoading(
@@ -371,7 +370,6 @@ class MainActivity : Activity() {
                 popup.isClickable = true
 
                 popup.webViewClient = WebViewClient()
-
                 popup.webChromeClient = createGameChromeClient()
 
                 val container = FrameLayout(this@MainActivity)
@@ -473,7 +471,6 @@ class MainActivity : Activity() {
                 url: String?
             ) {
                 super.onPageFinished(view, url)
-
                 readFishCatalog()
             }
         }
@@ -489,48 +486,83 @@ class MainActivity : Activity() {
             (function() {
 
                 let result = [];
+                let seen = new Set();
 
-                let rows = document.querySelectorAll(
-                    "tr, .item, .object, .library-item"
-                );
+                let excluded = [
+                    "home",
+                    "forum",
+                    "login",
+                    "register",
+                    "search",
+                    "next",
+                    "previous",
+                    "back",
+                    "library",
+                    "fisherman",
+                    "fishing",
+                    "fish resources"
+                ];
 
-                rows.forEach(function(row) {
+                function addName(value) {
 
-                    let name = (
-                        row.innerText ||
-                        row.textContent ||
+                    if (!value) return;
+
+                    let name = value
+                        .replace(/\s+/g, " ")
+                        .trim();
+
+                    if (name.length < 3 || name.length > 90) {
+                        return;
+                    }
+
+                    let lower = name.toLowerCase();
+
+                    if (excluded.some(x => lower === x)) {
+                        return;
+                    }
+
+                    if (seen.has(lower)) return;
+
+                    seen.add(lower);
+
+                    result.push({
+                        name: name,
+                        details: name
+                    });
+                }
+
+                let links = document.querySelectorAll("a");
+
+                links.forEach(function(a) {
+
+                    let text = (
+                        a.innerText ||
+                        a.textContent ||
                         ""
                     ).trim();
 
-                    name = name.replace(/\s+/g, " ");
+                    let title = (
+                        a.getAttribute("title") ||
+                        ""
+                    ).trim();
 
-                    if (name.length > 2 && name.length < 180) {
-                        result.push({
-                            name: name,
-                            details: name
-                        });
+                    let image = a.querySelector("img");
+
+                    let imageName = "";
+
+                    if (image) {
+                        imageName =
+                            image.getAttribute("alt") ||
+                            image.getAttribute("title") ||
+                            "";
+                    }
+
+                    let name = text || title || imageName;
+
+                    if (name) {
+                        addName(name);
                     }
                 });
-
-                if (result.length === 0) {
-
-                    document.querySelectorAll("a").forEach(function(a) {
-
-                        let name = (
-                            a.innerText ||
-                            a.textContent ||
-                            a.getAttribute("title") ||
-                            ""
-                        ).trim();
-
-                        if (name.length > 2 && name.length < 100) {
-                            result.push({
-                                name: name,
-                                details: name
-                            });
-                        }
-                    });
-                }
 
                 return JSON.stringify(result);
 
@@ -576,7 +608,7 @@ class MainActivity : Activity() {
                 showFishList()
 
                 scanStatus.text =
-                    "Biblioteka pobrana. Pozycje: ${fishList.size}"
+                    "Biblioteka: ${fishList.size} pozycji."
 
             } catch (e: Exception) {
 
@@ -595,15 +627,13 @@ class MainActivity : Activity() {
         ) {
 
             fishList.filter {
-                it.name.contains("Mystras", ignoreCase = true) ||
-                it.details.contains("Mystras", ignoreCase = true)
+                it.name.contains("Mystras", ignoreCase = true)
             }
 
         } else {
 
             fishList.filter {
-                !it.name.contains("Mystras", ignoreCase = true) &&
-                !it.details.contains("Mystras", ignoreCase = true)
+                !it.name.contains("Mystras", ignoreCase = true)
             }
         }
 
@@ -655,9 +685,10 @@ class MainActivity : Activity() {
         if (analysisRunning) return
 
         analysisRunning = true
+        scanInProgress = false
 
         scanStatus.text =
-            "ANALIZA URUCHOMIONA\nWybrany surowiec: $selectedFish"
+            "Analiza uruchomiona. Jeden obrazek na skan."
 
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
@@ -666,6 +697,7 @@ class MainActivity : Activity() {
     private fun stopAnalysis() {
 
         analysisRunning = false
+        scanInProgress = false
 
         handler.removeCallbacks(scanRunnable)
 
@@ -674,6 +706,10 @@ class MainActivity : Activity() {
         scanStatus.text = "Analiza zatrzymana."
     }
         private fun scanPage() {
+
+        if (scanInProgress) return
+
+        scanInProgress = true
 
         val js = """
             (function() {
@@ -699,8 +735,8 @@ class MainActivity : Activity() {
                                 let r = img.getBoundingClientRect();
 
                                 if (
-                                    r.width > 1 &&
-                                    r.height > 1
+                                    r.width > 5 &&
+                                    r.height > 5
                                 ) {
                                     images.push(img);
                                 }
@@ -739,11 +775,15 @@ class MainActivity : Activity() {
                     });
                 }
 
+                // Losujemy dokładnie JEDEN obrazek.
                 let index = Math.floor(
                     Math.random() * images.length
                 );
 
                 let img = images[index];
+
+                let oldOutline = img.style.outline;
+                let oldShadow = img.style.boxShadow;
 
                 try {
                     img.scrollIntoView({
@@ -752,9 +792,6 @@ class MainActivity : Activity() {
                         inline: "center"
                     });
                 } catch(e) {}
-
-                let oldOutline = img.style.outline;
-                let oldShadow = img.style.boxShadow;
 
                 function flash() {
 
@@ -777,28 +814,25 @@ class MainActivity : Activity() {
                     img.style.boxShadow = oldShadow;
                 }
 
+                // Pierwsze oznaczenie.
                 flash();
 
+                // Drugie oznaczenie.
                 setTimeout(function() {
                     clear();
-                }, 200);
-
-                setTimeout(function() {
                     flash();
-                }, 400);
+                }, 300);
 
                 setTimeout(function() {
                     clear();
-                }, 800);
+                }, 900);
 
                 return JSON.stringify({
-
                     count: images.length,
                     canvases: canvases,
                     frames: frames,
                     marked: true,
                     selected: index + 1
-
                 });
 
             })();
@@ -813,43 +847,54 @@ class MainActivity : Activity() {
                     scanStatus.text =
                         "Brak odpowiedzi skanera."
 
-                    return@evaluateJavascript
-                }
-
-                val decoded =
-                    JSONArray("[$result]").getString(0)
-
-                val data = JSONObject(decoded)
-
-                val count = data.optInt("count")
-                val canvases = data.optInt("canvases")
-                val frames = data.optInt("frames")
-                val marked = data.optBoolean("marked")
-
-                if (marked) {
-
-                    scanStatus.text =
-                        "ANALIZA ZAKOŃCZONA\n" +
-                        "Znalezione obrazki: $count\n" +
-                        "Ramki iframe: $frames\n" +
-                        "Elementy Canvas: $canvases\n" +
-                        "Oznaczony obraz: ${data.optInt("selected")}\n" +
-                        "Wybrany surowiec: $selectedFish"
-
                 } else {
 
-                    scanStatus.text =
-                        "NIE ZNALEZIONO OBRAZKÓW\n" +
-                        "Znalezione obrazki: 0\n" +
-                        "Ramki iframe: $frames\n" +
-                        "Elementy Canvas: $canvases\n" +
-                        "Wybrany surowiec: $selectedFish"
+                    val decoded =
+                        JSONArray("[$result]").getString(0)
+
+                    val data = JSONObject(decoded)
+
+                    val count = data.optInt("count")
+                    val canvases = data.optInt("canvases")
+                    val frames = data.optInt("frames")
+                    val marked = data.optBoolean("marked")
+
+                    if (marked) {
+
+                        scanStatus.text =
+                            "JEDEN OBRAZEK OZNACZONY DWUKROTNIE\n" +
+                            "Wszystkie znalezione: $count\n" +
+                            "Oznaczony numer: ${data.optInt("selected")}\n" +
+                            "Canvas: $canvases\n" +
+                            "Ramki: $frames\n" +
+                            "Surowiec wybrany: $selectedFish"
+
+                    } else {
+
+                        scanStatus.text =
+                            "Nie znaleziono obrazków.\n" +
+                            "Canvas: $canvases\n" +
+                            "Ramki: $frames\n" +
+                            "Wybrany surowiec: $selectedFish"
+                    }
                 }
 
             } catch (e: Exception) {
 
                 scanStatus.text =
                     "Błąd analizy: ${e.message}"
+
+            } finally {
+
+                scanInProgress = false
+
+                if (analysisRunning) {
+                    handler.removeCallbacks(scanRunnable)
+                    handler.postDelayed(
+                        scanRunnable,
+                        scanInterval
+                    )
+                }
             }
         }
     }
@@ -900,6 +945,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
 
         analysisRunning = false
+        scanInProgress = false
 
         handler.removeCallbacks(scanRunnable)
 
