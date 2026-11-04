@@ -85,7 +85,7 @@ class MainActivity : Activity() {
         fishName = EditText(this)
         fishName.hint = "Wpisz nazwę ryby"
         fishName.textSize = 14f
-        fishName.singleLine = true
+        fishName.setSingleLine(true)
         layout.addView(fishName)
 
         webContainer = FrameLayout(this)
@@ -290,7 +290,6 @@ class MainActivity : Activity() {
         scanCount = 0
 
         scanStatus.text = "Rozpoczynam analizę..."
-
         status.text = "ANALIZA AKTYWNA"
 
         handler.removeCallbacks(scanRunnable)
@@ -312,7 +311,6 @@ class MainActivity : Activity() {
         if (!running || scanInProgress) return
 
         val activeWebView = popupWebView ?: webView
-
         val selectedFish = fishName.text.toString().trim()
 
         if (selectedFish.isEmpty()) return
@@ -433,7 +431,7 @@ class MainActivity : Activity() {
 
             })();
         """.trimIndent()
-                activeWebView.evaluateJavascript(javascript) { result ->
+             activeWebView.evaluateJavascript(javascript) { result ->
 
             try {
 
@@ -551,4 +549,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-}
+}   
