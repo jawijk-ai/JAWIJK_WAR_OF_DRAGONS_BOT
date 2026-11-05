@@ -358,18 +358,18 @@ class MainActivity : Activity() {
             12f
         )
 
-        logScroll = ScrollView(this).apply {
-            visibility = View.GONE
-            isFillViewport = true
-            addView(
-                scanStatus,
-               LinearLayout.LayoutParams(
-    ViewGroup.LayoutParams.MATCH_PARENT,
-    ViewGroup.LayoutParams.WRAP_CONTENT
-)
-            )
-        }
+   logScroll = ScrollView(this).apply {
+    visibility = View.GONE
+    isFillViewport = true
 
+    addView(
+        scanStatus,
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+    )
+}
         logButton.setOnClickListener {
             if (logScroll.visibility == View.VISIBLE) {
                 logScroll.visibility = View.GONE
