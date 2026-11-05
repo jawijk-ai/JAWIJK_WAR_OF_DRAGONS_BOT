@@ -390,10 +390,7 @@ class MainActivity : Activity() {
 
             addView(
                 scanStatus,
-                FrameLayout.LayoutParams(
-    ViewGroup.LayoutParams.MATCH_PARENT,
-    ViewGroup.LayoutParams.WRAP_CONTENT
-)
+                ScrollView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 )
@@ -876,8 +873,7 @@ class MainActivity : Activity() {
             imageWidth = bitmap.width,
             imageHeight = bitmap.height
         )
-    }
-        // --------------------------------------------------
+    }     // --------------------------------------------------
     // POBIERANIE STRONY INTERNETOWEJ
     // --------------------------------------------------
 
