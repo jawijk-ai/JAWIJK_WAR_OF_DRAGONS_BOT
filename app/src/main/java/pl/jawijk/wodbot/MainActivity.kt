@@ -247,8 +247,7 @@ class MainActivity : Activity() {
             }
         }
     }
-
-    private fun startAnalysis() {
+        private fun startAnalysis() {
 
         if (running) return
 
@@ -378,7 +377,7 @@ class MainActivity : Activity() {
                         screenHeight: Math.round(rect.height),
                         visible: isVisible(canvas),
                         id: canvas.id || '',
-                        className: typeof canvas.className === 'string'
+                        className: typeof canvas.className === 'string
                             ? canvas.className
                             : ''
                     });
@@ -530,8 +529,7 @@ class MainActivity : Activity() {
                         )
                     }
                 }
-
-                output.append("\nELEMENTY SVG:\n")
+                           output.append("\nELEMENTY SVG:\n")
                 output.append("Liczba: ${data.optInt("svgCount")}\n")
 
                 output.append("\nRAMKI I LISTY:\n")
@@ -660,4 +658,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-}
+}     
