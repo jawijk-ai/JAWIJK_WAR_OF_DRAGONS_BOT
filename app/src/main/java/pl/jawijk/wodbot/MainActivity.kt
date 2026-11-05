@@ -24,6 +24,7 @@ import android.widget.*
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.ArrayDeque
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -49,8 +50,10 @@ class MainActivity : Activity() {
     private var scanInProgress = false
     private var scanCount = 0
 
-    private val mystrasTemplateCache =
-        mutableMapOf<Int, List<Bitmap>>()
+    private val mystrasTemplateCache = mutableMapOf<Int, List<Bitmap>>()
+
+    private val mystrasMarkerUrl =
+        "https://warofdragons.com/info/pictures/image/ubN7GSS.png"
 
     private val basicTargets = arrayOf(
         "Niebieski",
@@ -178,6 +181,7 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             setPadding(8, 3, 8, 1)
         }
+
         root.addView(targetLabel)
 
         targetSpinner = Spinner(this)
@@ -218,6 +222,7 @@ class MainActivity : Activity() {
             Color.BLACK,
             21f
         )
+
         zoomOut.setOnClickListener {
             activeWebView()?.zoomOut()
         }
@@ -229,6 +234,7 @@ class MainActivity : Activity() {
             Color.BLACK,
             12f
         )
+
         zoomReset.setOnClickListener {
             resetZoom()
         }
@@ -240,6 +246,7 @@ class MainActivity : Activity() {
             Color.BLACK,
             21f
         )
+
         zoomIn.setOnClickListener {
             activeWebView()?.zoomIn()
         }
@@ -251,6 +258,7 @@ class MainActivity : Activity() {
             Color.WHITE,
             13f
         )
+
         startButton.setOnClickListener {
             startAnalysis()
         }
@@ -262,6 +270,7 @@ class MainActivity : Activity() {
             Color.WHITE,
             13f
         )
+
         stopButton.setOnClickListener {
             stopAnalysis()
         }
@@ -272,18 +281,22 @@ class MainActivity : Activity() {
             zoomOut,
             LinearLayout.LayoutParams(0, controlHeight, 0.8f)
         )
+
         controls.addView(
             zoomReset,
             LinearLayout.LayoutParams(0, controlHeight, 1f)
         )
+
         controls.addView(
             zoomIn,
             LinearLayout.LayoutParams(0, controlHeight, 0.8f)
         )
+
         controls.addView(
             startButton,
             LinearLayout.LayoutParams(0, controlHeight, 1.3f)
         )
+
         controls.addView(
             stopButton,
             LinearLayout.LayoutParams(0, controlHeight, 1.3f)
@@ -297,6 +310,7 @@ class MainActivity : Activity() {
             setTextColor(Color.GREEN)
             setPadding(8, 3, 8, 3)
         }
+
         root.addView(status)
 
         // --------------------------------------------------
@@ -358,18 +372,19 @@ class MainActivity : Activity() {
             12f
         )
 
-   logScroll = ScrollView(this).apply {
-    visibility = View.GONE
-    isFillViewport = true
+        logScroll = ScrollView(this).apply {
+            visibility = View.GONE
+            isFillViewport = true
 
-    addView(
-        scanStatus,
-        LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
-    )
-}
+            addView(
+                scanStatus,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
         logButton.setOnClickListener {
             if (logScroll.visibility == View.VISIBLE) {
                 logScroll.visibility = View.GONE
@@ -567,6 +582,7 @@ class MainActivity : Activity() {
             }
         }
     }
+
     // --------------------------------------------------
     // ZAMYKANIE OKNA POPUP
     // --------------------------------------------------
@@ -707,7 +723,7 @@ class MainActivity : Activity() {
     }
 
     // --------------------------------------------------
-    // MYSTRAS - ANALIZA WYBRANEGO SUROWCA
+    // MYSTRAS - ANALIZA WZORCA KÓŁKA NA WODZIE
     // --------------------------------------------------
 
     private fun analyzeMystras(
@@ -727,7 +743,8 @@ class MainActivity : Activity() {
         if (templates.isEmpty()) {
             return AnalysisResult(
                 emptyList(),
-                "Nie udało się pobrać grafik wzorcowych dla: $target\n" +
+                "Nie udało się pobrać wzorca kółka na wodzie.\n" +
+                    "Adres wzorca: $mystrasMarkerUrl\n" +
                     "Sprawdź połączenie z biblioteką gry."
             )
         }
@@ -738,10 +755,13 @@ class MainActivity : Activity() {
             if (detections.size >= 100) break
 
             val scales = floatArrayOf(
+                0.60f,
                 0.75f,
+                0.90f,
                 1.0f,
-                1.25f,
-                1.5f
+                1.15f,
+                1.30f,
+                1.50f
             )
 
             for (scale in scales) {
@@ -765,8 +785,9 @@ class MainActivity : Activity() {
                 )
 
                 try {
-                    val stepX = max(2, scaledWidth / 4)
-                    val stepY = max(2, scaledHeight / 4)
+                    // Gęstsze sprawdzanie pozycji niż w poprzedniej wersji.
+                    val stepX = 2
+                    val stepY = 2
 
                     var y = 0
 
@@ -781,21 +802,22 @@ class MainActivity : Activity() {
                                 y
                             )
 
-                            if (score <= 0.22f) {
+                            // Mniejszy wynik oznacza większe podobieństwo.
+                            if (score <= 0.18f) {
                                 val centerX = x + scaledWidth / 2
                                 val centerY = y + scaledHeight / 2
 
                                 val duplicate = detections.any {
                                     val dx = it.centerX - centerX
                                     val dy = it.centerY - centerY
-                                    val distance =
-                                        sqrt(
-                                            (dx * dx + dy * dy).toFloat()
-                                        )
+
+                                    val distance = sqrt(
+                                        (dx * dx + dy * dy).toFloat()
+                                    )
 
                                     distance < max(
-                                        14f,
-                                        min(scaledWidth, scaledHeight) * 0.7f
+                                        12f,
+                                        min(scaledWidth, scaledHeight) * 0.65f
                                     )
                                 }
 
@@ -820,7 +842,9 @@ class MainActivity : Activity() {
                         y += stepY
                     }
                 } finally {
-                    if (scaledTemplate !== template) {
+                    if (scaledTemplate !== template &&
+                        !scaledTemplate.isRecycled
+                    ) {
                         scaledTemplate.recycle()
                     }
                 }
@@ -832,12 +856,17 @@ class MainActivity : Activity() {
         report.append("TRYB: RYBY MYSTRAS\n")
         report.append("WYBRANY SUROWIEC: $target\n")
         report.append("OBRAZ GRY: ${bitmap.width}x${bitmap.height}\n")
+        report.append("WZORZEC: kółko na wodzie\n")
         report.append("WZORCE GRAFICZNE: ${templates.size}\n")
         report.append("WYKRYTE OBSZARY: ${detections.size}\n\n")
 
         if (detections.isEmpty()) {
             report.append(
                 "Nie znaleziono obszaru pasującego do wzorca.\n"
+            )
+            report.append(
+                "Wzorzec został pobrany, ale nie znaleziono " +
+                    "wystarczająco podobnego fragmentu ekranu."
             )
         } else {
             report.append("WYKRYTE POZYCJE:\n")
@@ -870,7 +899,8 @@ class MainActivity : Activity() {
         startY: Int
     ): Float {
 
-        val samples = 7
+        val samples = 13
+
         var difference = 0f
         var compared = 0
 
@@ -889,32 +919,33 @@ class MainActivity : Activity() {
 
                 val templatePixel = template.getPixel(tx, ty)
 
-                // Pomijamy przezroczyste fragmenty ikony.
-                if (Color.alpha(templatePixel) < 100) {
+                // Pomijanie przezroczystych fragmentów wzorca.
+                if (Color.alpha(templatePixel) < 80) {
                     continue
                 }
 
-                val screenX =
-                    startX + (sx.toFloat() / (samples - 1) *
-                        (template.width - 1)).toInt()
+                val screenX = startX + tx
+                val screenY = startY + ty
 
-                val screenY =
-                    startY + (sy.toFloat() / (samples - 1) *
-                        (template.height - 1)).toInt()
+                if (screenX !in 0 until screen.width ||
+                    screenY !in 0 until screen.height
+                ) {
+                    continue
+                }
 
                 val screenPixel = screen.getPixel(screenX, screenY)
 
-                val redDifference = kotlin.math.abs(
+                val redDifference = abs(
                     Color.red(templatePixel) -
                         Color.red(screenPixel)
                 )
 
-                val greenDifference = kotlin.math.abs(
+                val greenDifference = abs(
                     Color.green(templatePixel) -
                         Color.green(screenPixel)
                 )
 
-                val blueDifference = kotlin.math.abs(
+                val blueDifference = abs(
                     Color.blue(templatePixel) -
                         Color.blue(screenPixel)
                 )
@@ -929,13 +960,13 @@ class MainActivity : Activity() {
             }
         }
 
-        if (compared == 0) return 1f
+        if (compared < 30) return 1f
 
         return difference / compared
     }
 
     // --------------------------------------------------
-    // POBIERANIE WZORCÓW Z BIBLIOTEKI
+    // POBIERANIE WZORCA MYSTRAS
     // --------------------------------------------------
 
     private fun getMystrasTemplates(
@@ -946,69 +977,27 @@ class MainActivity : Activity() {
             return it
         }
 
-        val pageUrl =
-            "https://warofdragons.com/artifact_info.php?artikul_id=$artifactId"
-
-        val html = downloadText(pageUrl)
-
-        if (html.isBlank()) {
-            return emptyList()
-        }
-
-        val imageTags = Regex(
-            """(?is)<img\b[^>]*>"""
-        ).findAll(html)
-
-        val imageUrls = linkedSetOf<String>()
-
-        for (tag in imageTags) {
-            val srcMatch = Regex(
-                """(?is)(?:src|data-src)\s*=\s*["']([^"']+)["']"""
-            ).find(tag.value) ?: continue
-
-            val rawUrl = srcMatch.groupValues[1]
-                .replace("&amp;", "&")
-
-            val fullUrl = when {
-                rawUrl.startsWith("http://") ||
-                    rawUrl.startsWith("https://") -> rawUrl
-
-                rawUrl.startsWith("//") ->
-                    "https:$rawUrl"
-
-                rawUrl.startsWith("/") ->
-                    "https://warofdragons.com$rawUrl"
-
-                else ->
-                    "https://warofdragons.com/$rawUrl"
-            }
-
-            imageUrls.add(fullUrl)
-        }
-
         val templates = mutableListOf<Bitmap>()
 
-        for (imageUrl in imageUrls) {
-            if (templates.size >= 12) break
+        try {
+            val downloaded = downloadBitmap(mystrasMarkerUrl)
 
-            try {
-                val image = downloadBitmap(imageUrl) ?: continue
+            if (downloaded != null) {
+                val cropped = cropTransparentBorders(downloaded)
 
-                val ratio =
-                    image.width.toFloat() /
-                        image.height.coerceAtLeast(1)
-
-                if (
-                    image.width in 12..128 &&
-                    image.height in 12..128 &&
-                    ratio in 0.5f..2.0f
+                if (cropped !== downloaded &&
+                    !downloaded.isRecycled
                 ) {
-                    templates.add(image)
-                } else {
-                    image.recycle()
+                    downloaded.recycle()
                 }
-            } catch (_: Exception) {
+
+                if (cropped.width >= 5 && cropped.height >= 5) {
+                    templates.add(cropped)
+                } else {
+                    cropped.recycle()
+                }
             }
+        } catch (_: Exception) {
         }
 
         mystrasTemplateCache[artifactId] = templates
@@ -1016,33 +1005,58 @@ class MainActivity : Activity() {
         return templates
     }
 
-    private fun downloadBitmap(address: String): Bitmap? {
-        val connection =
-            URL(address).openConnection() as HttpURLConnection
+    // --------------------------------------------------
+    // USUWANIE PRZEZROCZYSTYCH MARGINESÓW WZORCA
+    // --------------------------------------------------
 
-        try {
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
-            connection.requestMethod = "GET"
+    private fun cropTransparentBorders(source: Bitmap): Bitmap {
 
-            connection.setRequestProperty(
-                "User-Agent",
-                "Mozilla/5.0"
-            )
+        var left = source.width
+        var top = source.height
+        var right = -1
+        var bottom = -1
 
-            return connection.inputStream.use { input ->
-                BitmapFactory.decodeStream(input)
+        for (y in 0 until source.height) {
+            for (x in 0 until source.width) {
+
+                val pixel = source.getPixel(x, y)
+
+                if (Color.alpha(pixel) > 20) {
+                    if (x < left) left = x
+                    if (x > right) right = x
+                    if (y < top) top = y
+                    if (y > bottom) bottom = y
+                }
             }
-        } finally {
-            connection.disconnect()
         }
+
+        if (right < left || bottom < top) {
+            return source
+        }
+
+        val width = right - left + 1
+        val height = bottom - top + 1
+
+        if (width == source.width &&
+            height == source.height
+        ) {
+            return source
+        }
+
+        return Bitmap.createBitmap(
+            source,
+            left,
+            top,
+            width,
+            height
+        )
     }
 
     // --------------------------------------------------
-    // POBIERANIE STRONY INTERNETOWEJ
+    // POBIERANIE OBRAZU
     // --------------------------------------------------
 
-    private fun downloadText(address: String): String {
+    private fun downloadBitmap(address: String): Bitmap? {
         val connection =
             URL(address).openConnection() as HttpURLConnection
 
@@ -1057,18 +1071,18 @@ class MainActivity : Activity() {
             )
 
             connection.setRequestProperty(
-                "Accept",
-                "text/html,application/xhtml+xml"
+                "Referer",
+                "https://warofdragons.com/"
             )
 
-            return connection.inputStream
-                .bufferedReader(Charsets.UTF_8)
-                .use { it.readText() }
-
+            return connection.inputStream.use { input ->
+                BitmapFactory.decodeStream(input)
+            }
         } finally {
             connection.disconnect()
         }
     }
+
     // --------------------------------------------------
     // WYNIK ANALIZY MYSTRAS I LOSOWANIE PUNKTU
     // --------------------------------------------------
