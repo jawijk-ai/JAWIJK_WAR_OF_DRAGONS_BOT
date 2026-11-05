@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -14,6 +15,7 @@ import android.graphics.drawable.GradientDrawable
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
+import android.view.MotionEvent
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -24,6 +26,7 @@ import java.net.URL
 import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 class MainActivity : Activity() {
 
@@ -46,7 +49,8 @@ class MainActivity : Activity() {
     private var scanInProgress = false
     private var scanCount = 0
 
-    private var mystrasReportCache: String? = null
+    private val mystrasTemplateCache =
+        mutableMapOf<Int, List<Bitmap>>()
 
     private val basicTargets = arrayOf(
         "Niebieski",
@@ -131,13 +135,7 @@ class MainActivity : Activity() {
             minWidth = 0
             minimumWidth = 0
 
-            setPadding(
-                dp(3),
-                0,
-                dp(3),
-                0
-            )
-
+            setPadding(dp(3), 0, dp(3), 0)
             stateListAnimator = null
         }
     }
@@ -167,13 +165,11 @@ class MainActivity : Activity() {
         root.addView(title)
 
         categorySpinner = Spinner(this)
-
         categorySpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
             arrayOf("Ryby podstawowe", "Ryby Mystras")
         )
-
         root.addView(categorySpinner)
 
         val targetLabel = TextView(this).apply {
@@ -182,14 +178,12 @@ class MainActivity : Activity() {
             setTextColor(Color.WHITE)
             setPadding(8, 3, 8, 1)
         }
-
         root.addView(targetLabel)
 
         targetSpinner = Spinner(this)
         root.addView(targetSpinner)
 
         intervalSpinner = Spinner(this)
-
         intervalSpinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
@@ -203,12 +197,11 @@ class MainActivity : Activity() {
                 "120 sekund"
             )
         )
-
         intervalSpinner.setSelection(2)
         root.addView(intervalSpinner)
 
         // --------------------------------------------------
-        // ZWARTY PASEK STEROWANIA
+        // PASEK STEROWANIA
         // --------------------------------------------------
 
         val controls = LinearLayout(this).apply {
@@ -225,7 +218,6 @@ class MainActivity : Activity() {
             Color.BLACK,
             21f
         )
-
         zoomOut.setOnClickListener {
             activeWebView()?.zoomOut()
         }
@@ -237,7 +229,6 @@ class MainActivity : Activity() {
             Color.BLACK,
             12f
         )
-
         zoomReset.setOnClickListener {
             resetZoom()
         }
@@ -249,7 +240,6 @@ class MainActivity : Activity() {
             Color.BLACK,
             21f
         )
-
         zoomIn.setOnClickListener {
             activeWebView()?.zoomIn()
         }
@@ -261,7 +251,6 @@ class MainActivity : Activity() {
             Color.WHITE,
             13f
         )
-
         startButton.setOnClickListener {
             startAnalysis()
         }
@@ -273,7 +262,6 @@ class MainActivity : Activity() {
             Color.WHITE,
             13f
         )
-
         stopButton.setOnClickListener {
             stopAnalysis()
         }
@@ -282,37 +270,23 @@ class MainActivity : Activity() {
 
         controls.addView(
             zoomOut,
-            LinearLayout.LayoutParams(0, controlHeight, 0.8f).apply {
-                setMargins(dp(2), 0, dp(2), 0)
-            }
+            LinearLayout.LayoutParams(0, controlHeight, 0.8f)
         )
-
         controls.addView(
             zoomReset,
-            LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
-                setMargins(dp(2), 0, dp(2), 0)
-            }
+            LinearLayout.LayoutParams(0, controlHeight, 1f)
         )
-
         controls.addView(
             zoomIn,
-            LinearLayout.LayoutParams(0, controlHeight, 0.8f).apply {
-                setMargins(dp(2), 0, dp(2), 0)
-            }
+            LinearLayout.LayoutParams(0, controlHeight, 0.8f)
         )
-
         controls.addView(
             startButton,
-            LinearLayout.LayoutParams(0, controlHeight, 1.3f).apply {
-                setMargins(dp(3), 0, dp(2), 0)
-            }
+            LinearLayout.LayoutParams(0, controlHeight, 1.3f)
         )
-
         controls.addView(
             stopButton,
-            LinearLayout.LayoutParams(0, controlHeight, 1.3f).apply {
-                setMargins(dp(2), 0, dp(3), 0)
-            }
+            LinearLayout.LayoutParams(0, controlHeight, 1.3f)
         )
 
         root.addView(controls)
@@ -323,7 +297,6 @@ class MainActivity : Activity() {
             setTextColor(Color.GREEN)
             setPadding(8, 3, 8, 3)
         }
-
         root.addView(status)
 
         // --------------------------------------------------
@@ -365,8 +338,9 @@ class MainActivity : Activity() {
                 1f
             )
         )
-               // --------------------------------------------------
-        // ZWIJANY LOG ANALIZY
+
+        // --------------------------------------------------
+        // LOG ANALIZY
         // --------------------------------------------------
 
         scanStatus = TextView(this).apply {
@@ -387,13 +361,12 @@ class MainActivity : Activity() {
         logScroll = ScrollView(this).apply {
             visibility = View.GONE
             isFillViewport = true
-
             addView(
                 scanStatus,
-                FrameLayout.LayoutParams(
-    ViewGroup.LayoutParams.MATCH_PARENT,
-    ViewGroup.LayoutParams.WRAP_CONTENT
-)
+                ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
             )
         }
 
@@ -510,7 +483,6 @@ class MainActivity : Activity() {
             loadWithOverviewMode = false
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
-
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
@@ -528,7 +500,6 @@ class MainActivity : Activity() {
         }
 
         view.webChromeClient = object : WebChromeClient() {
-
             override fun onCreateWindow(
                 view: WebView?,
                 isDialog: Boolean,
@@ -574,7 +545,6 @@ class MainActivity : Activity() {
             loadWithOverviewMode = false
             javaScriptCanOpenWindowsAutomatically = true
             setSupportMultipleWindows(true)
-
             setSupportZoom(true)
             builtInZoomControls = true
             displayZoomControls = false
@@ -597,7 +567,6 @@ class MainActivity : Activity() {
             }
         }
     }
-
     // --------------------------------------------------
     // ZAMYKANIE OKNA POPUP
     // --------------------------------------------------
@@ -653,11 +622,13 @@ class MainActivity : Activity() {
         running = false
 
         handler.removeCallbacks(scanRunnable)
+        handler.removeCallbacksAndMessages(null)
 
         status.text = "Status: zatrzymano"
         scanStatus.text = "Analiza zatrzymana"
 
         markerView.clearPoint()
+        scanInProgress = false
     }
 
     private fun selectedInterval(): Int {
@@ -711,29 +682,32 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 AnalysisResult(
                     emptyList(),
-                    "Błąd analizy: ${e.message}"
+                    "Błąd analizy: ${e.message}",
+                    bitmap.width,
+                    bitmap.height
                 )
             } finally {
                 bitmap.recycle()
             }
 
             runOnUiThread {
-                scanInProgress = false
-
-                if (!running) return@runOnUiThread
+                if (!running) {
+                    scanInProgress = false
+                    return@runOnUiThread
+                }
 
                 if (category == 0) {
+                    scanInProgress = false
                     showBasicResult(result)
                 } else {
-                    markerView.clearPoint()
-                    scanStatus.text = result.message
+                    showMystrasResult(result)
                 }
             }
         }.start()
     }
 
     // --------------------------------------------------
-    // MYSTRAS - POBIERANIE GRAFIK Z BIBLIOTEKI
+    // MYSTRAS - ANALIZA WYBRANEGO SUROWCA
     // --------------------------------------------------
 
     private fun analyzeMystras(
@@ -741,139 +715,330 @@ class MainActivity : Activity() {
         target: String
     ): AnalysisResult {
 
-        val cached = mystrasReportCache
+        val item = mystrasItems.firstOrNull {
+            it.first == target
+        } ?: return AnalysisResult(
+            emptyList(),
+            "Nie znaleziono wybranego surowca."
+        )
 
-        if (cached != null) {
+        val templates = getMystrasTemplates(item.second)
+
+        if (templates.isEmpty()) {
             return AnalysisResult(
                 emptyList(),
-                cached,
-                bitmap.width,
-                bitmap.height
+                "Nie udało się pobrać grafik wzorcowych dla: $target\n" +
+                    "Sprawdź połączenie z biblioteką gry."
             )
+        }
+
+        val detections = mutableListOf<Detection>()
+
+        for (template in templates) {
+            if (detections.size >= 100) break
+
+            val scales = floatArrayOf(
+                0.75f,
+                1.0f,
+                1.25f,
+                1.5f
+            )
+
+            for (scale in scales) {
+                val scaledWidth =
+                    (template.width * scale).toInt().coerceAtLeast(1)
+
+                val scaledHeight =
+                    (template.height * scale).toInt().coerceAtLeast(1)
+
+                if (scaledWidth > bitmap.width ||
+                    scaledHeight > bitmap.height
+                ) {
+                    continue
+                }
+
+                val scaledTemplate = Bitmap.createScaledBitmap(
+                    template,
+                    scaledWidth,
+                    scaledHeight,
+                    true
+                )
+
+                try {
+                    val stepX = max(2, scaledWidth / 4)
+                    val stepY = max(2, scaledHeight / 4)
+
+                    var y = 0
+
+                    while (y <= bitmap.height - scaledHeight) {
+                        var x = 0
+
+                        while (x <= bitmap.width - scaledWidth) {
+                            val score = compareTemplate(
+                                bitmap,
+                                scaledTemplate,
+                                x,
+                                y
+                            )
+
+                            if (score <= 0.22f) {
+                                val centerX = x + scaledWidth / 2
+                                val centerY = y + scaledHeight / 2
+
+                                val duplicate = detections.any {
+                                    val dx = it.centerX - centerX
+                                    val dy = it.centerY - centerY
+                                    val distance =
+                                        sqrt(
+                                            (dx * dx + dy * dy).toFloat()
+                                        )
+
+                                    distance < max(
+                                        14f,
+                                        min(scaledWidth, scaledHeight) * 0.7f
+                                    )
+                                }
+
+                                if (!duplicate) {
+                                    detections.add(
+                                        Detection(
+                                            colorId = item.second,
+                                            colorName = target,
+                                            centerX = centerX,
+                                            centerY = centerY,
+                                            width = scaledWidth,
+                                            height = scaledHeight,
+                                            pixelCount = 0
+                                        )
+                                    )
+                                }
+                            }
+
+                            x += stepX
+                        }
+
+                        y += stepY
+                    }
+                } finally {
+                    if (scaledTemplate !== template) {
+                        scaledTemplate.recycle()
+                    }
+                }
+            }
         }
 
         val report = StringBuilder()
 
-        report.append("ANALIZA WZORCÓW MYSTRAS\n")
+        report.append("TRYB: RYBY MYSTRAS\n")
         report.append("WYBRANY SUROWIEC: $target\n")
-        report.append("OBRAZ GRY: ${bitmap.width}x${bitmap.height}\n\n")
+        report.append("OBRAZ GRY: ${bitmap.width}x${bitmap.height}\n")
+        report.append("WZORCE GRAFICZNE: ${templates.size}\n")
+        report.append("WYKRYTE OBSZARY: ${detections.size}\n\n")
 
-        report.append("POBIERANIE GRAFIK Z BIBLIOTEKI...\n\n")
+        if (detections.isEmpty()) {
+            report.append(
+                "Nie znaleziono obszaru pasującego do wzorca.\n"
+            )
+        } else {
+            report.append("WYKRYTE POZYCJE:\n")
 
-        for ((name, id) in mystrasItems) {
-
-            report.append("--------------------------------\n")
-            report.append("SUROWIEC: $name\n")
-            report.append("ID: $id\n")
-
-            try {
-                val pageUrl =
-                    "https://warofdragons.com/artifact_info.php?artikul_id=$id"
-
-                val html = downloadText(pageUrl)
-
-                if (html.isBlank()) {
-                    report.append("BŁĄD: pusta strona przedmiotu\n\n")
-                    continue
-                }
-
-                val imageTags = Regex(
-                    """(?is)<img\b[^>]*>"""
-                ).findAll(html)
-
-                val imageUrls = linkedSetOf<String>()
-
-                for (tag in imageTags) {
-
-                    val srcMatch = Regex(
-                        """(?is)(?:src|data-src)\s*=\s*["']([^"']+)["']"""
-                    ).find(tag.value) ?: continue
-
-                    val rawUrl = srcMatch.groupValues[1]
-                        .replace("&amp;", "&")
-
-                    val fullUrl = when {
-                        rawUrl.startsWith("http://") ||
-                        rawUrl.startsWith("https://") -> rawUrl
-
-                        rawUrl.startsWith("//") ->
-                            "https:$rawUrl"
-
-                        rawUrl.startsWith("/") ->
-                            "https://warofdragons.com$rawUrl"
-
-                        else ->
-                            "https://warofdragons.com/$rawUrl"
-                    }
-
-                    imageUrls.add(fullUrl)
-                }
-
+            detections.take(30).forEachIndexed { index, detection ->
                 report.append(
-                    "ZNALEZIONE ADRESY GRAFIK: ${imageUrls.size}\n"
-                )
-
-                if (imageUrls.isEmpty()) {
-                    report.append("Nie znaleziono znaczników IMG.\n\n")
-                    continue
-                }
-
-                var checked = 0
-
-                for (imageUrl in imageUrls) {
-
-                    if (checked >= 20) break
-
-                    try {
-                        val dimensions = getImageDimensions(imageUrl)
-
-                        if (dimensions != null) {
-                            report.append(
-                                "${checked + 1}. " +
-                                "${dimensions.first}x${dimensions.second}\n"
-                            )
-
-                            report.append("$imageUrl\n")
-
-                            checked++
-                        }
-
-                    } catch (e: Exception) {
-                        report.append(
-                            "Błąd obrazu: ${e.message}\n"
-                        )
-                    }
-                }
-
-                report.append(
-                    "SPRAWDZONE GRAFIKI: $checked\n\n"
-                )
-
-            } catch (e: Exception) {
-                report.append(
-                    "BŁĄD POBIERANIA: ${e.message}\n\n"
+                    "${index + 1}. X=${detection.centerX}, " +
+                        "Y=${detection.centerY}, " +
+                        "${detection.width}x${detection.height}\n"
                 )
             }
         }
 
-        report.append("--------------------------------\n")
-        report.append("KONIEC ODCZYTU BIBLIOTEKI\n\n")
-        report.append(
-            "To jest etap przygotowania wzorców. " +
-            "Rozpoznawanie ikon na mapie Mystras nie jest jeszcze aktywne."
-        )
-
-        val finalReport = report.toString()
-
-        mystrasReportCache = finalReport
-
         return AnalysisResult(
-            detections = emptyList(),
-            message = finalReport,
+            detections = detections,
+            message = report.toString(),
             imageWidth = bitmap.width,
             imageHeight = bitmap.height
         )
-    }     // --------------------------------------------------
+    }
+
+    // --------------------------------------------------
+    // PORÓWNYWANIE WZORCA Z OBRAZEM GRY
+    // --------------------------------------------------
+
+    private fun compareTemplate(
+        screen: Bitmap,
+        template: Bitmap,
+        startX: Int,
+        startY: Int
+    ): Float {
+
+        val samples = 7
+        var difference = 0f
+        var compared = 0
+
+        for (sy in 0 until samples) {
+            for (sx in 0 until samples) {
+
+                val tx = (
+                    sx.toFloat() / (samples - 1) *
+                        (template.width - 1)
+                    ).toInt()
+
+                val ty = (
+                    sy.toFloat() / (samples - 1) *
+                        (template.height - 1)
+                    ).toInt()
+
+                val templatePixel = template.getPixel(tx, ty)
+
+                // Pomijamy przezroczyste fragmenty ikony.
+                if (Color.alpha(templatePixel) < 100) {
+                    continue
+                }
+
+                val screenX =
+                    startX + (sx.toFloat() / (samples - 1) *
+                        (template.width - 1)).toInt()
+
+                val screenY =
+                    startY + (sy.toFloat() / (samples - 1) *
+                        (template.height - 1)).toInt()
+
+                val screenPixel = screen.getPixel(screenX, screenY)
+
+                val redDifference = kotlin.math.abs(
+                    Color.red(templatePixel) -
+                        Color.red(screenPixel)
+                )
+
+                val greenDifference = kotlin.math.abs(
+                    Color.green(templatePixel) -
+                        Color.green(screenPixel)
+                )
+
+                val blueDifference = kotlin.math.abs(
+                    Color.blue(templatePixel) -
+                        Color.blue(screenPixel)
+                )
+
+                difference += (
+                    redDifference +
+                        greenDifference +
+                        blueDifference
+                    ) / 765f
+
+                compared++
+            }
+        }
+
+        if (compared == 0) return 1f
+
+        return difference / compared
+    }
+
+    // --------------------------------------------------
+    // POBIERANIE WZORCÓW Z BIBLIOTEKI
+    // --------------------------------------------------
+
+    private fun getMystrasTemplates(
+        artifactId: Int
+    ): List<Bitmap> {
+
+        mystrasTemplateCache[artifactId]?.let {
+            return it
+        }
+
+        val pageUrl =
+            "https://warofdragons.com/artifact_info.php?artikul_id=$artifactId"
+
+        val html = downloadText(pageUrl)
+
+        if (html.isBlank()) {
+            return emptyList()
+        }
+
+        val imageTags = Regex(
+            """(?is)<img\b[^>]*>"""
+        ).findAll(html)
+
+        val imageUrls = linkedSetOf<String>()
+
+        for (tag in imageTags) {
+            val srcMatch = Regex(
+                """(?is)(?:src|data-src)\s*=\s*["']([^"']+)["']"""
+            ).find(tag.value) ?: continue
+
+            val rawUrl = srcMatch.groupValues[1]
+                .replace("&amp;", "&")
+
+            val fullUrl = when {
+                rawUrl.startsWith("http://") ||
+                    rawUrl.startsWith("https://") -> rawUrl
+
+                rawUrl.startsWith("//") ->
+                    "https:$rawUrl"
+
+                rawUrl.startsWith("/") ->
+                    "https://warofdragons.com$rawUrl"
+
+                else ->
+                    "https://warofdragons.com/$rawUrl"
+            }
+
+            imageUrls.add(fullUrl)
+        }
+
+        val templates = mutableListOf<Bitmap>()
+
+        for (imageUrl in imageUrls) {
+            if (templates.size >= 12) break
+
+            try {
+                val image = downloadBitmap(imageUrl) ?: continue
+
+                val ratio =
+                    image.width.toFloat() /
+                        image.height.coerceAtLeast(1)
+
+                if (
+                    image.width in 12..128 &&
+                    image.height in 12..128 &&
+                    ratio in 0.5f..2.0f
+                ) {
+                    templates.add(image)
+                } else {
+                    image.recycle()
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        mystrasTemplateCache[artifactId] = templates
+
+        return templates
+    }
+
+    private fun downloadBitmap(address: String): Bitmap? {
+        val connection =
+            URL(address).openConnection() as HttpURLConnection
+
+        try {
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.requestMethod = "GET"
+
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0"
+            )
+
+            return connection.inputStream.use { input ->
+                BitmapFactory.decodeStream(input)
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    // --------------------------------------------------
     // POBIERANIE STRONY INTERNETOWEJ
     // --------------------------------------------------
 
@@ -904,51 +1069,120 @@ class MainActivity : Activity() {
             connection.disconnect()
         }
     }
+    // --------------------------------------------------
+    // WYNIK ANALIZY MYSTRAS I LOSOWANIE PUNKTU
+    // --------------------------------------------------
 
-    private fun getImageDimensions(
-        address: String
-    ): Pair<Int, Int>? {
+    private fun showMystrasResult(result: AnalysisResult) {
+        val target = targetSpinner.selectedItem?.toString() ?: ""
 
-        val connection =
-            URL(address).openConnection() as HttpURLConnection
-
-        try {
-            connection.connectTimeout = 8000
-            connection.readTimeout = 8000
-            connection.requestMethod = "GET"
-
-            connection.setRequestProperty(
-                "User-Agent",
-                "Mozilla/5.0"
-            )
-
-            val options = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
-            }
-
-            connection.inputStream.use { input ->
-                BitmapFactory.decodeStream(
-                    input,
-                    null,
-                    options
-                )
-            }
-
-            if (
-                options.outWidth <= 0 ||
-                options.outHeight <= 0
-            ) {
-                return null
-            }
-
-            return Pair(
-                options.outWidth,
-                options.outHeight
-            )
-
-        } finally {
-            connection.disconnect()
+        val matching = result.detections.filter {
+            it.colorName == target
         }
+
+        if (matching.isEmpty()) {
+            scanInProgress = false
+            markerView.clearPoint()
+            scanStatus.text = result.message
+            return
+        }
+
+        // Losowanie jednego wykrytego obszaru.
+        val selected = matching.random()
+
+        // Zaznaczenie środka wykrytego obszaru.
+        markerView.setPoint(
+            selected.centerX.toFloat(),
+            selected.centerY.toFloat()
+        )
+
+        val report = StringBuilder()
+
+        report.append(result.message)
+        report.append("\n--------------------------------\n")
+        report.append("LOSOWO WYBRANY OBSZAR:\n")
+        report.append("SUROWIEC: ${selected.colorName}\n")
+        report.append(
+            "ŚRODEK: X=${selected.centerX}, Y=${selected.centerY}\n"
+        )
+        report.append(
+            "ROZMIAR: ${selected.width}x${selected.height}\n"
+        )
+        report.append("WYKONYWANIE DWÓCH KLIKNIĘĆ...\n")
+
+        scanStatus.text = report.toString()
+
+        // Dwa kliknięcia w tym samym punkcie.
+        performDoubleClick(
+            selected.centerX.toFloat(),
+            selected.centerY.toFloat()
+        )
+    }
+
+    // --------------------------------------------------
+    // PODWÓJNE KLIKNIĘCIE W WEBVIEW
+    // --------------------------------------------------
+
+    private fun performDoubleClick(x: Float, y: Float) {
+        val active = activeWebView()
+
+        if (!running || active == null) {
+            scanInProgress = false
+            return
+        }
+
+        // Pierwsze kliknięcie.
+        performTap(active, x, y)
+
+        scanStatus.append("Pierwsze kliknięcie wykonane.\n")
+
+        // Drugie kliknięcie po około 180 ms.
+        handler.postDelayed({
+            if (running) {
+                val current = activeWebView()
+
+                if (current != null) {
+                    performTap(current, x, y)
+                    scanStatus.append("Drugie kliknięcie wykonane.\n")
+                }
+            }
+
+            // Po kliknięciach można wykonać następny skan.
+            scanInProgress = false
+
+        }, 180L)
+    }
+
+    private fun performTap(
+        target: WebView,
+        x: Float,
+        y: Float
+    ) {
+        val downTime = SystemClock.uptimeMillis()
+
+        val downEvent = MotionEvent.obtain(
+            downTime,
+            downTime,
+            MotionEvent.ACTION_DOWN,
+            x,
+            y,
+            0
+        )
+
+        target.dispatchTouchEvent(downEvent)
+        downEvent.recycle()
+
+        val upEvent = MotionEvent.obtain(
+            downTime,
+            SystemClock.uptimeMillis(),
+            MotionEvent.ACTION_UP,
+            x,
+            y,
+            0
+        )
+
+        target.dispatchTouchEvent(upEvent)
+        upEvent.recycle()
     }
 
     // --------------------------------------------------
@@ -977,7 +1211,6 @@ class MainActivity : Activity() {
         )
 
         if (matching.isEmpty()) {
-
             markerView.clearPoint()
 
             report.append(
@@ -987,7 +1220,6 @@ class MainActivity : Activity() {
             report.append(result.message)
 
         } else {
-
             val selected = matching.random()
 
             markerView.setPoint(
@@ -1128,7 +1360,7 @@ class MainActivity : Activity() {
 
             val ratio =
                 objectWidth.toFloat() /
-                objectHeight.coerceAtLeast(1).toFloat()
+                    objectHeight.coerceAtLeast(1).toFloat()
 
             if (
                 count >= 5 &&
@@ -1315,6 +1547,14 @@ class MainActivity : Activity() {
 
             webView.stopLoading()
             webView.destroy()
+
+            mystrasTemplateCache.values.flatten().forEach {
+                if (!it.isRecycled) {
+                    it.recycle()
+                }
+            }
+
+            mystrasTemplateCache.clear()
 
         } catch (_: Exception) {
         }
