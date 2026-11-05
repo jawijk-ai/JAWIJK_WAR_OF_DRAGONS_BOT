@@ -5,11 +5,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
-import android.os.SystemClock
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.view.MotionEvent
+import android.graphics.Paint
+import android.content.Context
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -28,10 +28,10 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var scanStatus: TextView
     private lateinit var webContainer: FrameLayout
+    private lateinit var markerView: MarkerView
 
     private lateinit var categorySpinner: Spinner
     private lateinit var targetSpinner: Spinner
-    private lateinit var targetTitle: TextView
     private lateinit var intervalSpinner: Spinner
 
     private var popupWebView: WebView? = null
@@ -39,6 +39,8 @@ class MainActivity : Activity() {
     private var running = false
     private var scanInProgress = false
     private var scanCount = 0
+
+    private val handler = Handler(Looper.getMainLooper())
 
     private val basicTargets = arrayOf(
         "Niebieski",
@@ -58,87 +60,65 @@ class MainActivity : Activity() {
         10, 20, 30, 45, 60, 90, 120
     )
 
-    private val handler = Handler(Looper.getMainLooper())
-
     private val scanRunnable = object : Runnable {
         override fun run() {
-            if (running && !scanInProgress) {
+            if (!running) return
+
+            if (!scanInProgress) {
                 scanPage()
             }
+
+            handler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        layout.setPadding(6, 6, 6, 6)
+        CookieManager.getInstance().setAcceptCookie(true)
 
-        status = TextView(this)
-        status.text = "JAWIJK WOD – GOTOWY"
-        status.textSize = 16f
-        status.setPadding(8, 8, 8, 8)
-        layout.addView(status)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(22, 22, 22))
+        }
 
-        val categoryLabel = TextView(this)
-        categoryLabel.text = "KATEGORIA:"
-        layout.addView(categoryLabel)
+        val title = TextView(this).apply {
+            text = "JAWIJK WOD BOT"
+            textSize = 21f
+            setTextColor(Color.WHITE)
+            gravity = android.view.Gravity.CENTER
+            setPadding(8, 12, 8, 12)
+        }
+
+        root.addView(title)
 
         categorySpinner = Spinner(this)
 
-        val categoryAdapter = ArrayAdapter(
+        categorySpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_item,
-            arrayOf(
-                "Ryby podstawowe",
-                "Ryby Mystras"
-            )
+            android.R.layout.simple_spinner_dropdown_item,
+            arrayOf("Ryby podstawowe", "Ryby Mystras")
         )
 
-        categoryAdapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item
-        )
+        root.addView(categorySpinner)
 
-        categorySpinner.adapter = categoryAdapter
-        layout.addView(categorySpinner)
+        val targetLabel = TextView(this).apply {
+            text = "WYBRANY CEL:"
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            setPadding(8, 5, 8, 2)
+        }
 
-        targetTitle = TextView(this)
-        targetTitle.text = "WYBIERZ KOLOR KÓŁKA:"
-        layout.addView(targetTitle)
+        root.addView(targetLabel)
 
         targetSpinner = Spinner(this)
-        layout.addView(targetSpinner)
-
-        updateTargetList()
-
-        categorySpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                ) {
-                    updateTargetList()
-                }
-
-                override fun onNothingSelected(
-                    parent: AdapterView<*>?
-                ) {
-                }
-            }
-
-        val intervalTitle = TextView(this)
-        intervalTitle.text = "CZAS DO NASTĘPNEGO SUROWCA:"
-        layout.addView(intervalTitle)
+        root.addView(targetSpinner)
 
         intervalSpinner = Spinner(this)
 
-        val intervalAdapter = ArrayAdapter(
+        intervalSpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_item,
+            android.R.layout.simple_spinner_dropdown_item,
             arrayOf(
                 "10 sekund",
                 "20 sekund",
@@ -150,17 +130,98 @@ class MainActivity : Activity() {
             )
         )
 
-        intervalAdapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item
+        intervalSpinner.setSelection(2)
+        root.addView(intervalSpinner)
+
+        val zoomPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+            setPadding(4, 5, 4, 5)
+        }
+
+        val zoomOut = Button(this).apply {
+            text = "−"
+            textSize = 20f
+            setOnClickListener {
+                activeWebView()?.zoomOut()
+            }
+        }
+
+        val zoomReset = Button(this).apply {
+            text = "100%"
+            setOnClickListener {
+                resetZoom()
+            }
+        }
+
+        val zoomIn = Button(this).apply {
+            text = "+"
+            textSize = 20f
+            setOnClickListener {
+                activeWebView()?.zoomIn()
+            }
+        }
+
+        zoomPanel.addView(
+            zoomOut,
+            LinearLayout.LayoutParams(0, 48, 1f)
         )
 
-        intervalSpinner.adapter = intervalAdapter
-        intervalSpinner.setSelection(2)
+        zoomPanel.addView(
+            zoomReset,
+            LinearLayout.LayoutParams(0, 48, 1f)
+        )
 
-        layout.addView(intervalSpinner)
+        zoomPanel.addView(
+            zoomIn,
+            LinearLayout.LayoutParams(0, 48, 1f)
+        )
+
+        root.addView(zoomPanel)
+
+        status = TextView(this).apply {
+            text = "Status: gotowy"
+            textSize = 13f
+            setTextColor(Color.GREEN)
+            setPadding(8, 5, 8, 5)
+        }
+
+        root.addView(status)
+
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        val startButton = Button(this).apply {
+            text = "START"
+            setOnClickListener {
+                startAnalysis()
+            }
+        }
+
+        val stopButton = Button(this).apply {
+            text = "STOP"
+            setOnClickListener {
+                stopAnalysis()
+            }
+        }
+
+        buttons.addView(
+            startButton,
+            LinearLayout.LayoutParams(0, 52, 1f)
+        )
+
+        buttons.addView(
+            stopButton,
+            LinearLayout.LayoutParams(0, 52, 1f)
+        )
+
+        root.addView(buttons)
 
         webContainer = FrameLayout(this)
+
         webView = WebView(this)
+        configureWebView(webView)
 
         webContainer.addView(
             webView,
@@ -170,7 +231,21 @@ class MainActivity : Activity() {
             )
         )
 
-        layout.addView(
+        markerView = MarkerView(this)
+
+        markerView.isClickable = false
+        markerView.isFocusable = false
+        markerView.setOnTouchListener { _, _ -> false }
+
+        webContainer.addView(
+            markerView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        root.addView(
             webContainer,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -179,123 +254,110 @@ class MainActivity : Activity() {
             )
         )
 
-        val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
-
-        val startButton = Button(this)
-        startButton.text = "START"
-        startButton.setOnClickListener {
-            startAnalysis()
+        scanStatus = TextView(this).apply {
+            text = "Analiza: oczekiwanie na START"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(8, 8, 8, 8)
         }
 
-        val stopButton = Button(this)
-        stopButton.text = "STOP"
-        stopButton.setOnClickListener {
-            stopAnalysis()
-        }
+        root.addView(scanStatus)
 
-        buttons.addView(
-            startButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
+        setContentView(root)
 
-        buttons.addView(
-            stopButton,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
+        updateTargets()
 
-        layout.addView(buttons)
+        categorySpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
 
-        val resultTitle = TextView(this)
-        resultTitle.text = "WYNIKI ANALIZY:"
-        layout.addView(resultTitle)
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    updateTargets()
 
-        scanStatus = TextView(this)
-        scanStatus.text = "Oczekiwanie na START..."
-        scanStatus.textSize = 12f
-        scanStatus.setPadding(5, 5, 5, 5)
-        scanStatus.setTextIsSelectable(true)
+                    if (::markerView.isInitialized) {
+                        markerView.clearPoint()
+                    }
 
-        val scroll = ScrollView(this)
-        scroll.addView(scanStatus)
+                    scanStatus.text =
+                        if (position == 0) {
+                            "Tryb: RYBY PODSTAWOWE"
+                        } else {
+                            "Tryb: RYBY MYSTRAS"
+                        }
+                }
 
-        layout.addView(
-            scroll,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                140
-            )
-        )
+                override fun onNothingSelected(
+                    parent: AdapterView<*>?
+                ) {}
+            }
 
-        setContentView(layout)
-
-        configureWebView()
-        webView.loadUrl("https://www.warofdragons.com/")
+        webView.loadUrl("https://warofdragons.com/")
     }
 
-    private fun updateTargetList() {
+    private fun updateTargets() {
+        val items =
+            if (categorySpinner.selectedItemPosition == 0) {
+                basicTargets
+            } else {
+                mystrasTargets
+            }
 
-        val basicMode =
-            categorySpinner.selectedItemPosition == 0
-
-        val targets = if (basicMode) {
-            basicTargets
-        } else {
-            mystrasTargets
-        }
-
-        val adapter = ArrayAdapter(
+        targetSpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_item,
-            targets
+            android.R.layout.simple_spinner_dropdown_item,
+            items
         )
-
-        adapter.setDropDownViewResource(
-            android.R.layout.simple_spinner_dropdown_item
-        )
-
-        targetSpinner.adapter = adapter
-
-        targetTitle.text = if (basicMode) {
-            "WYBIERZ KOLOR KÓŁKA:"
-        } else {
-            "WYBIERZ RYBĘ MYSTRAS:"
-        }
     }
 
-    private fun configureWebView() {
+    private fun activeWebView(): WebView? {
+        return popupWebView ?: webView
+    }
 
-        val settings = webView.settings
+    private fun resetZoom() {
+        val active = activeWebView() ?: return
 
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        settings.databaseEnabled = true
-        settings.loadsImagesAutomatically = true
-        settings.javaScriptCanOpenWindowsAutomatically = true
-        settings.setSupportMultipleWindows(true)
-        settings.useWideViewPort = true
-        settings.loadWithOverviewMode = true
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
-
-        CookieManager.getInstance().setAcceptCookie(true)
-
-        if (android.os.Build.VERSION.SDK_INT >= 21) {
-            CookieManager.getInstance()
-                .setAcceptThirdPartyCookies(webView, true)
+        if (active.scale > 0f) {
+            active.zoomBy(1f / active.scale)
         }
 
-        webView.webViewClient = object : WebViewClient() {
+        active.settings.textZoom = 100
 
+        status.text = "Status: powiększenie przywrócone"
+    }
+
+    private fun configureWebView(view: WebView) {
+        view.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            loadsImagesAutomatically = true
+            useWideViewPort = true
+            loadWithOverviewMode = false
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(true)
+
+            setSupportZoom(true)
+            builtInZoomControls = true
+            displayZoomControls = false
+        }
+
+        view.setBackgroundColor(Color.BLACK)
+
+        view.webViewClient = object : WebViewClient() {
             override fun onPageFinished(
                 view: WebView?,
                 url: String?
             ) {
                 super.onPageFinished(view, url)
-                status.text = "Strona gry załadowana"
+                status.text = "Status: strona załadowana"
             }
         }
 
-        webView.webChromeClient = object : WebChromeClient() {
+        view.webChromeClient = object : WebChromeClient() {
 
             override fun onCreateWindow(
                 view: WebView?,
@@ -306,28 +368,15 @@ class MainActivity : Activity() {
 
                 val popup = WebView(this@MainActivity)
 
-                popup.settings.javaScriptEnabled = true
-                popup.settings.domStorageEnabled = true
-                popup.settings.loadsImagesAutomatically = true
-                popup.settings.javaScriptCanOpenWindowsAutomatically = true
-                popup.settings.setSupportMultipleWindows(true)
-                popup.settings.useWideViewPort = true
-                popup.settings.loadWithOverviewMode = true
-
-                CookieManager.getInstance().setAcceptCookie(true)
-
-                if (android.os.Build.VERSION.SDK_INT >= 21) {
-                    CookieManager.getInstance()
-                        .setAcceptThirdPartyCookies(popup, true)
-                }
-
-                popup.webViewClient = WebViewClient()
-                popup.webChromeClient = this
+                configurePopupWebView(popup)
 
                 popupWebView = popup
 
+                webContainer.removeView(webView)
+
                 webContainer.addView(
                     popup,
+                    0,
                     FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -338,492 +387,411 @@ class MainActivity : Activity() {
                     resultMsg?.obj as? WebView.WebViewTransport
                         ?: return false
 
-                transport.setWebView(popup)
+                transport.webView = popup
                 resultMsg.sendToTarget()
+
+                status.text = "Status: otwarto nowe okno"
 
                 return true
             }
+        }
+    }
+        private fun configurePopupWebView(popup: WebView) {
+        popup.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            loadsImagesAutomatically = true
+            useWideViewPort = true
+            loadWithOverviewMode = false
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(true)
 
+            setSupportZoom(true)
+            builtInZoomControls = true
+            displayZoomControls = false
+        }
+
+        popup.setBackgroundColor(Color.BLACK)
+
+        popup.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
+            ) {
+                status.text = "Status: okno gry załadowane"
+            }
+        }
+
+        popup.webChromeClient = object : WebChromeClient() {
             override fun onCloseWindow(window: WebView?) {
-
-                if (window != null) {
-                    webContainer.removeView(window)
-                    window.destroy()
-                }
-
-                popupWebView = null
+                closePopup()
             }
         }
     }
-        private fun startAnalysis() {
 
+    private fun closePopup() {
+        val popup = popupWebView ?: return
+
+        webContainer.removeView(popup)
+
+        popup.stopLoading()
+        popup.destroy()
+
+        popupWebView = null
+
+        webContainer.addView(
+            webView,
+            0,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        status.text = "Status: powrót do głównego okna"
+    }
+
+    private fun startAnalysis() {
         if (running) return
 
         running = true
-        scanInProgress = false
         scanCount = 0
 
-        status.text = "ANALIZA AKTYWNA"
-        scanStatus.text = "Rozpoczynam wyszukiwanie celu..."
+        markerView.clearPoint()
+
+        status.text = "Status: analiza uruchomiona"
+
+        scanStatus.text = "Analiza: oczekiwanie na pierwszy skan"
 
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
+
+        scanPage()
     }
 
     private fun stopAnalysis() {
-
         running = false
 
         handler.removeCallbacks(scanRunnable)
 
-        status.text = "ANALIZA ZATRZYMANA"
-        scanStatus.text = "Zatrzymano analizę i kolejne kliknięcia."
+        status.text = "Status: zatrzymano"
+        scanStatus.text = "Analiza zatrzymana"
+
+        markerView.clearPoint()
+    }
+
+    private fun selectedInterval(): Int {
+        val position = intervalSpinner.selectedItemPosition
+            .coerceIn(0, intervalValues.lastIndex)
+
+        return intervalValues[position] * 1000
     }
 
     private fun scanPage() {
-
         if (!running || scanInProgress) return
 
-        val activeWebView = popupWebView ?: webView
+        val active = activeWebView()
 
-        if (
-            !activeWebView.isAttachedToWindow ||
-            activeWebView.width <= 0 ||
-            activeWebView.height <= 0
-        ) {
-            scanStatus.text = "Okno gry nie jest widoczne."
-            scheduleNextScan()
+        if (active == null || active.width <= 0 || active.height <= 0) {
+            scanStatus.text = "Analiza: ekran gry nie jest gotowy"
             return
         }
 
         scanInProgress = true
+        scanCount++
 
-        scanStatus.text = "SKAN W TOKU..."
-
-        val selectedCategory =
-            categorySpinner.selectedItemPosition
-
-        val selectedTarget =
-            targetSpinner.selectedItem?.toString() ?: ""
-
-        try {
-
-            val bitmap = Bitmap.createBitmap(
-                activeWebView.width,
-                activeWebView.height,
+        val bitmap = try {
+            Bitmap.createBitmap(
+                active.width,
+                active.height,
                 Bitmap.Config.ARGB_8888
-            )
-
-            activeWebView.draw(Canvas(bitmap))
-
-            Thread {
-
-                try {
-
-                    val report = analyzeBitmap(
-                        bitmap,
-                        selectedCategory,
-                        selectedTarget
-                    )
-
-                    runOnUiThread {
-
-                        if (!bitmap.isRecycled) {
-                            bitmap.recycle()
-                        }
-
-                        if (running) {
-
-                            scanCount++
-
-                            status.text =
-                                "ANALIZA AKTYWNA | SKAN: $scanCount"
-
-                            scanStatus.text = report.first
-
-                            if (
-                                selectedCategory == 0 &&
-                                report.second.isNotEmpty()
-                            ) {
-
-                                val chosen = report.second.random()
-
-                                scanStatus.append(
-                                    "\n\nWYLOSOWANY CEL:\n" +
-                                    "${chosen.colorName}\n" +
-                                    "X=${chosen.x}, Y=${chosen.y}\n" +
-                                    "Wykonuję podwójne kliknięcie..."
-                                )
-
-                                performDoubleClick(
-                                    activeWebView,
-                                    chosen.x.toFloat(),
-                                    chosen.y.toFloat()
-                                )
-
-                            } else if (selectedCategory == 0) {
-
-                                scanStatus.append(
-                                    "\n\nNie znaleziono celu do kliknięcia."
-                                )
-                            }
-                        }
-
-                        scanInProgress = false
-                        scheduleNextScan()
-                    }
-
-                } catch (e: Exception) {
-
-                    runOnUiThread {
-
-                        if (!bitmap.isRecycled) {
-                            bitmap.recycle()
-                        }
-
-                        scanStatus.text =
-                            "BŁĄD ANALIZY: ${e.message}"
-
-                        scanInProgress = false
-                        scheduleNextScan()
-                    }
-                }
-
-            }.start()
-
+            ).also { image ->
+                val canvas = Canvas(image)
+                active.draw(canvas)
+            }
         } catch (e: Exception) {
-
-            scanStatus.text =
-                "BŁĄD POBIERANIA OBRAZU: ${e.message}"
-
             scanInProgress = false
-            scheduleNextScan()
+            scanStatus.text = "Analiza: błąd obrazu: ${e.message}"
+            return
         }
-    }
 
-    private fun scheduleNextScan() {
+        val category = categorySpinner.selectedItemPosition
+        val target = targetSpinner.selectedItem?.toString() ?: ""
 
-        if (running) {
-
-            handler.removeCallbacks(scanRunnable)
-
-            val position =
-                intervalSpinner.selectedItemPosition
-
-            val seconds = intervalValues[
-                position.coerceIn(
-                    0,
-                    intervalValues.lastIndex
+        Thread {
+            val result = try {
+                if (category == 0) {
+                    analyzeBitmap(bitmap, target)
+                } else {
+                    analyzeMystras(bitmap, target)
+                }
+            } catch (e: Exception) {
+                AnalysisResult(
+                    emptyList(),
+                    "Błąd analizy: ${e.message}"
                 )
-            ]
+            } finally {
+                bitmap.recycle()
+            }
 
-            scanStatus.append(
-                "\n\nNastępna analiza za $seconds sekund."
-            )
+            runOnUiThread {
+                scanInProgress = false
 
-            handler.postDelayed(
-                scanRunnable,
-                seconds * 1000L
-            )
-        }
+                if (!running) return@runOnUiThread
+
+                if (category == 0) {
+                    showBasicResult(result)
+                } else {
+                    markerView.clearPoint()
+
+                    scanStatus.text =
+                        "MYSTRAS: ${result.message}\n" +
+                        "Automatyczne rozpoznawanie Mystras nie jest jeszcze aktywne."
+                }
+            }
+        }.start()
     }
 
-    private fun performDoubleClick(
-        view: WebView,
-        x: Float,
-        y: Float
-    ) {
+    private fun showBasicResult(result: AnalysisResult) {
+        val target = targetSpinner.selectedItem?.toString() ?: ""
 
-        if (!running) return
-
-        if (!view.isAttachedToWindow) {
-            scanStatus.append(
-                "\nNie można kliknąć: okno gry jest niewidoczne."
-            )
-            return
+        val matching = result.detections.filter {
+            it.colorName == target
         }
 
-        if (
-            x < 0 ||
-            y < 0 ||
-            x >= view.width ||
-            y >= view.height
-        ) {
-            scanStatus.append(
-                "\nBŁĄD: współrzędne poza obszarem gry."
-            )
-            return
-        }
+        val report = StringBuilder()
 
-        fun singleClick() {
+        report.append("TRYB: RYBY PODSTAWOWE\n")
+        report.append("WYBRANY KOLOR: $target\n")
+        report.append("OBRAZ: ${result.imageWidth}x${result.imageHeight}\n")
+        report.append("WYKRYTE OBSZARY: ${result.detections.size}\n")
+        report.append("OBSZARY WYBRANEGO KOLORU: ${matching.size}\n\n")
 
-            val downTime = SystemClock.uptimeMillis()
+        if (matching.isEmpty()) {
+            markerView.clearPoint()
 
-            val down = MotionEvent.obtain(
-                downTime,
-                downTime,
-                MotionEvent.ACTION_DOWN,
-                x,
-                y,
-                0
+            report.append("NIE ZNALEZIONO OBSZARU WYBRANEGO KOLORU.\n")
+            report.append(result.message)
+
+        } else {
+            val selected = matching.random()
+
+            markerView.setPoint(
+                selected.centerX.toFloat(),
+                selected.centerY.toFloat()
             )
 
-            view.dispatchTouchEvent(down)
-            down.recycle()
+            report.append("LOSOWO WYBRANE WYKRYCIE:\n")
+            report.append("KOLOR: ${selected.colorName}\n")
+            report.append("POZYCJA: X=${selected.centerX}, Y=${selected.centerY}\n")
+            report.append("ROZMIAR: ${selected.width}x${selected.height}\n")
+            report.append("PIKSELE OBSZARU: ${selected.pixelCount}\n\n")
 
-            val upTime = SystemClock.uptimeMillis()
+            report.append("POZOSTAŁE WYKRYCIA WYBRANEGO KOLORU:\n")
 
-            val up = MotionEvent.obtain(
-                downTime,
-                upTime,
-                MotionEvent.ACTION_UP,
-                x,
-                y,
-                0
-            )
-
-            view.dispatchTouchEvent(up)
-            up.recycle()
-        }
-
-        // Pierwsze kliknięcie.
-        singleClick()
-
-        // Drugie kliknięcie po 120 milisekundach.
-        handler.postDelayed({
-
-            if (running && view.isAttachedToWindow) {
-
-                singleClick()
-
-                scanStatus.append(
-                    "\nWysłano dwa kliknięcia."
+            matching.forEachIndexed { index, detection ->
+                report.append(
+                    "${index + 1}. ${detection.colorName} " +
+                    "X=${detection.centerX}, Y=${detection.centerY} " +
+                    "${detection.width}x${detection.height} " +
+                    "piksele=${detection.pixelCount}\n"
                 )
             }
 
-        }, 120)
+            report.append("\nCZERWONY ZNACZNIK OZNACZA WYBRANY OBSZAR.")
+            report.append("\nBOT NIE KLIKA W GRZE.")
+        }
+
+        scanStatus.text = report.toString()
     }
 
     private data class Detection(
+        val colorId: Int,
         val colorName: String,
-        val x: Int,
-        val y: Int,
-        val pixels: Int,
+        val centerX: Int,
+        val centerY: Int,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val pixelCount: Int
     )
+
+    private data class AnalysisResult(
+        val detections: List<Detection>,
+        val message: String,
+        val imageWidth: Int = 0,
+        val imageHeight: Int = 0
+    )
+
+    private fun analyzeMystras(
+        bitmap: Bitmap,
+        target: String
+    ): AnalysisResult {
+        return AnalysisResult(
+            emptyList(),
+            "Wybrany cel: $target. Rozpoznawanie obrazów Mystras wymaga osobnego wzorca."
+        )
+    }
 
     private fun analyzeBitmap(
         bitmap: Bitmap,
-        category: Int,
         target: String
-    ): Pair<String, List<Detection>> {
-
-        if (category == 1) {
-
-            return Pair(
-                analyzeMystras(bitmap, target),
-                emptyList()
-            )
-        }
-
-        val selectedColorId = when (target) {
-            "Niebieski" -> 1
-            "Fioletowy" -> 2
-            "Szary" -> 3
-            "Zielony" -> 4
-            "Czerwony" -> 5
-            else -> 0
-        }
-
-        if (selectedColorId == 0) {
-
-            return Pair(
-                "Nie wybrano prawidłowego koloru.",
-                emptyList()
-            )
-        }
+    ): AnalysisResult {
 
         val width = bitmap.width
         val height = bitmap.height
 
         val step = 2
 
-        val gridWidth = width / step
-        val gridHeight = height / step
+        val gridWidth = (width + step - 1) / step
+        val gridHeight = (height + step - 1) / step
 
-        if (gridWidth < 5 || gridHeight < 5) {
+        val total = gridWidth * gridHeight
 
-            return Pair(
-                "Obraz łowiska jest za mały.",
-                emptyList()
-            )
-        }
-
-        val colors = Array(gridHeight) {
-            IntArray(gridWidth)
-        }
+        val colorGrid = IntArray(total)
 
         for (gy in 0 until gridHeight) {
-
             for (gx in 0 until gridWidth) {
 
-                val px = min(gx * step, width - 1)
-                val py = min(gy * step, height - 1)
+                val x = min(gx * step, width - 1)
+                val y = min(gy * step, height - 1)
 
-                colors[gy][gx] = classifyColor(
-                    bitmap.getPixel(px, py)
+                val pixel = bitmap.getPixel(x, y)
+
+                colorGrid[gy * gridWidth + gx] =
+                    classifyColor(pixel)
+            }
+        }
+
+        val visited = BooleanArray(total)
+        val queue = ArrayDeque<Int>()
+
+        val detections = mutableListOf<Detection>()
+
+        for (start in 0 until total) {
+
+            val colorId = colorGrid[start]
+
+            if (colorId == 0 || visited[start]) continue
+
+            visited[start] = true
+            queue.clear()
+            queue.add(start)
+
+            var count = 0
+
+            var minX = gridWidth
+            var minY = gridHeight
+            var maxX = 0
+            var maxY = 0
+
+            while (queue.isNotEmpty()) {
+
+                val current = queue.removeFirst()
+
+                val gx = current % gridWidth
+                val gy = current / gridWidth
+
+                count++
+
+                minX = min(minX, gx)
+                minY = min(minY, gy)
+                maxX = max(maxX, gx)
+                maxY = max(maxY, gy)
+
+                val neighbors = intArrayOf(
+                    if (gx > 0) current - 1 else -1,
+                    if (gx < gridWidth - 1) current + 1 else -1,
+                    if (gy > 0) current - gridWidth else -1,
+                    if (gy < gridHeight - 1) current + gridWidth else -1
+                )
+
+                for (neighbor in neighbors) {
+
+                    if (neighbor < 0) continue
+                    if (visited[neighbor]) continue
+                    if (colorGrid[neighbor] != colorId) continue
+
+                    visited[neighbor] = true
+                    queue.add(neighbor)
+                }
+            }
+
+            val objectWidth = (maxX - minX + 1) * step
+            val objectHeight = (maxY - minY + 1) * step
+
+            val ratio =
+                objectWidth.toFloat() /
+                objectHeight.coerceAtLeast(1).toFloat()
+
+            if (
+                count >= 5 &&
+                count <= 1800 &&
+                ratio in 0.45f..2.2f
+            ) {
+
+                val centerX =
+                    ((minX + maxX) / 2) * step
+
+                val centerY =
+                    ((minY + maxY) / 2) * step
+
+                detections.add(
+                    Detection(
+                        colorId = colorId,
+                        colorName = colorName(colorId),
+                        centerX = centerX,
+                        centerY = centerY,
+                        width = objectWidth,
+                        height = objectHeight,
+                        pixelCount = count * step * step
+                    )
                 )
             }
         }
 
-        val visited = Array(gridHeight) {
-            BooleanArray(gridWidth)
-        }
-
-        val detections = mutableListOf<Detection>()
-
-        val dx = intArrayOf(
-            1, -1, 0, 0, 1, 1, -1, -1
-        )
-
-        val dy = intArrayOf(
-            0, 0, 1, -1, 1, -1, 1, -1
-        )
-
-        for (y in 0 until gridHeight) {
-
-            for (x in 0 until gridWidth) {
-
-                if (
-                    colors[y][x] != selectedColorId ||
-                    visited[y][x]
-                ) {
-                    continue
-                }
-
-                val queue = ArrayDeque<Int>()
-
-                queue.add(y * gridWidth + x)
-                visited[y][x] = true
-
-                var count = 0
-
-                var minX = x
-                var maxX = x
-                var minY = y
-                var maxY = y
-
-                var sumX = 0
-                var sumY = 0
-
-                while (queue.isNotEmpty()) {
-
-                    val point = queue.removeFirst()
-
-                    val cx = point % gridWidth
-                    val cy = point / gridWidth
-
-                    count++
-
-                    sumX += cx
-                    sumY += cy
-
-                    minX = min(minX, cx)
-                    maxX = max(maxX, cx)
-
-                    minY = min(minY, cy)
-                    maxY = max(maxY, cy)
-
-                    for (d in 0 until 8) {
-
-                        val nx = cx + dx[d]
-                        val ny = cy + dy[d]
-
-                        if (
-                            nx in 0 until gridWidth &&
-                            ny in 0 until gridHeight &&
-                            !visited[ny][nx] &&
-                            colors[ny][nx] == selectedColorId
-                        ) {
-
-                            visited[ny][nx] = true
-                            queue.add(ny * gridWidth + nx)
-                        }
-                    }
-                }
-
-                val boxWidth = maxX - minX + 1
-                val boxHeight = maxY - minY + 1
-
-                val ratio =
-                    boxWidth.toFloat() /
-                    max(1, boxHeight).toFloat()
-
-                if (
-                    count >= 5 &&
-                    count <= 1800 &&
-                    ratio in 0.45f..2.2f
-                ) {
-
-                    detections.add(
-                        Detection(
-                            colorName(selectedColorId),
-                            (sumX / count) * step,
-                            (sumY / count) * step,
-                            count,
-                            boxWidth * step,
-                            boxHeight * step
-                        )
-                    )
-                }
-            }
-        }
-
-        return Pair(
-            buildBasicReport(
-                width,
-                height,
-                target,
-                detections
-            ),
-            detections
+        return AnalysisResult(
+            detections = detections,
+            message = "Analiza zakończona.",
+            imageWidth = width,
+            imageHeight = height
         )
     }
         private fun classifyColor(pixel: Int): Int {
 
         val hsv = FloatArray(3)
+
         Color.colorToHSV(pixel, hsv)
 
         val hue = hsv[0]
         val saturation = hsv[1]
         val value = hsv[2]
 
-        if (value < 0.20f) return 0
-
-        // Szary.
+        // SZARY
         if (saturation < 0.20f && value > 0.30f) {
             return 3
         }
 
-        if (saturation < 0.25f) return 0
+        if (saturation < 0.25f) {
+            return 0
+        }
 
-        // Niebieski.
+        // NIEBIESKI
         if (hue in 185f..245f) {
             return 1
         }
 
-        // Fioletowy.
+        // FIOLETOWY
         if (hue in 246f..305f) {
             return 2
         }
 
-        // Zielony.
+        // ZIELONY
         if (hue in 65f..175f) {
             return 4
         }
 
-        // Czerwony.
+        // CZERWONY
         if (hue <= 15f || hue >= 345f) {
             return 5
         }
@@ -831,133 +799,108 @@ class MainActivity : Activity() {
         return 0
     }
 
-    private fun colorName(id: Int): String {
-
-        return when (id) {
-            1 -> "NIEBIESKI"
-            2 -> "FIOLETOWY"
-            3 -> "SZARY"
-            4 -> "ZIELONY"
-            5 -> "CZERWONY"
-            else -> "NIEZNANY"
+    private fun colorName(colorId: Int): String {
+        return when (colorId) {
+            1 -> "Niebieski"
+            2 -> "Fioletowy"
+            3 -> "Szary"
+            4 -> "Zielony"
+            5 -> "Czerwony"
+            else -> "Nieznany"
         }
     }
 
-    private fun buildBasicReport(
-        width: Int,
-        height: Int,
-        target: String,
-        detections: List<Detection>
-    ): String {
+    private inner class MarkerView(context: Context) :
+        View(context) {
 
-        val output = StringBuilder()
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        output.append("TRYB: RYBY PODSTAWOWE\n")
-        output.append("WYBRANY KOLOR: $target\n")
-        output.append("OBRAZ: ${width}x${height}\n")
-        output.append(
-            "WYKRYTE OBSZARY: ${detections.size}\n\n"
-        )
+        private var pointX = -1f
+        private var pointY = -1f
 
-        if (detections.isEmpty()) {
+        fun setPoint(x: Float, y: Float) {
+            pointX = x
+            pointY = y
+            invalidate()
+        }
 
-            output.append(
-                "Nie wykryto obszarów wybranego koloru.\n"
+        fun clearPoint() {
+            pointX = -1f
+            pointY = -1f
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+
+            if (pointX < 0f || pointY < 0f) return
+
+            paint.color = Color.RED
+            paint.strokeWidth = 4f
+            paint.style = Paint.Style.STROKE
+
+            // Czerwone kółko
+            canvas.drawCircle(
+                pointX,
+                pointY,
+                12f,
+                paint
             )
 
-        } else {
+            // Pozioma linia
+            canvas.drawLine(
+                pointX - 18f,
+                pointY,
+                pointX + 18f,
+                pointY,
+                paint
+            )
 
-            for (i in detections.indices) {
+            // Pionowa linia
+            canvas.drawLine(
+                pointX,
+                pointY - 18f,
+                pointX,
+                pointY + 18f,
+                paint
+            )
 
-                val item = detections[i]
-
-                output.append("${i + 1}. ${item.colorName}\n")
-
-                output.append(
-                    "Pozycja: X=${item.x}, Y=${item.y}\n"
-                )
-
-                output.append(
-                    "Rozmiar: ${item.width}x${item.height}\n"
-                )
-
-                output.append(
-                    "Punkty obrazu: ${item.pixels}\n\n"
-                )
-            }
+            paint.style = Paint.Style.FILL
         }
-
-        output.append(
-            "Następny wybór zostanie wykonany po kolejnym skanie."
-        )
-
-        return output.toString()
-    }
-
-    private fun analyzeMystras(
-        bitmap: Bitmap,
-        target: String
-    ): String {
-
-        val output = StringBuilder()
-
-        output.append("TRYB: RYBY MYSTRAS\n")
-        output.append("WYBRANA RYBA: $target\n\n")
-
-        output.append("Dostępne cele:\n")
-
-        for (fish in mystrasTargets) {
-            output.append("- $fish\n")
-        }
-
-        output.append("\nOBRAZ ŁOWISKA:\n")
-        output.append(
-            "${bitmap.width}x${bitmap.height}\n\n"
-        )
-
-        output.append(
-            "Rozpoznawanie Mystras jest oddzielone od kolorów.\n"
-        )
-
-        output.append(
-            "Automatyczne klikanie Mystras nie jest jeszcze aktywne."
-        )
-
-        return output.toString()
     }
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
 
-        val popup = popupWebView
-
-        if (popup != null) {
-
-            webContainer.removeView(popup)
-            popup.destroy()
-            popupWebView = null
-
+        if (popupWebView != null) {
+            closePopup()
             return
         }
 
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
+        val active = activeWebView()
+
+        if (active != null && active.canGoBack()) {
+            active.goBack()
+            return
         }
+
+        super.onBackPressed()
     }
 
     override fun onDestroy() {
-
         running = false
-        scanInProgress = false
 
-        handler.removeCallbacks(scanRunnable)
+        handler.removeCallbacksAndMessages(null)
 
-        popupWebView?.destroy()
-        popupWebView = null
+        try {
+            popupWebView?.stopLoading()
+            popupWebView?.destroy()
+            popupWebView = null
 
-        webView.destroy()
+            webView.stopLoading()
+            webView.destroy()
+        } catch (_: Exception) {
+        }
 
         super.onDestroy()
     }
