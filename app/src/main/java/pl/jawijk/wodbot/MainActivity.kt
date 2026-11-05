@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Message
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -14,10 +15,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.ArrayDeque
 import kotlin.math.max
 import kotlin.math.min
@@ -40,7 +42,8 @@ class MainActivity : Activity() {
     private var scanInProgress = false
     private var scanCount = 0
 
-    private val handler = Handler(Looper.getMainLooper())
+    // Raport biblioteki Mystras pobieramy tylko raz.
+    private var mystrasReportCache: String? = null
 
     private val basicTargets = arrayOf(
         "Niebieski",
@@ -50,15 +53,24 @@ class MainActivity : Activity() {
         "Czerwony"
     )
 
+    // LISTY MYSTRAS NIE ZMIENIAMY
     private val mystrasTargets = arrayOf(
         "Golden Shams",
         "Mystras Serpentfish",
         "Akduff the Multiped"
     )
 
+    private val mystrasItems = listOf(
+        "Golden Shams" to 40155,
+        "Mystras Serpentfish" to 40156,
+        "Akduff the Multiped" to 40157
+    )
+
     private val intervalValues = intArrayOf(
         10, 20, 30, 45, 60, 90, 120
     )
+
+    private val handler = Handler(Looper.getMainLooper())
 
     private val scanRunnable = object : Runnable {
         override fun run() {
@@ -68,7 +80,10 @@ class MainActivity : Activity() {
                 scanPage()
             }
 
-            handler.postDelayed(this, 1000)
+            handler.postDelayed(
+                this,
+                selectedInterval().toLong()
+            )
         }
     }
 
@@ -133,6 +148,7 @@ class MainActivity : Activity() {
         intervalSpinner.setSelection(2)
         root.addView(intervalSpinner)
 
+        // PANEL POWIĘKSZANIA
         val zoomPanel = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
@@ -231,11 +247,11 @@ class MainActivity : Activity() {
             )
         )
 
-        markerView = MarkerView(this)
-
-        markerView.isClickable = false
-        markerView.isFocusable = false
-        markerView.setOnTouchListener { _, _ -> false }
+        markerView = MarkerView(this).apply {
+            isClickable = false
+            isFocusable = false
+            setOnTouchListener { _, _ -> false }
+        }
 
         webContainer.addView(
             markerView,
@@ -325,7 +341,6 @@ class MainActivity : Activity() {
         }
 
         active.settings.textZoom = 100
-
         status.text = "Status: powiększenie przywrócone"
     }
 
@@ -352,7 +367,6 @@ class MainActivity : Activity() {
                 view: WebView?,
                 url: String?
             ) {
-                super.onPageFinished(view, url)
                 status.text = "Status: strona załadowana"
             }
         }
@@ -367,11 +381,9 @@ class MainActivity : Activity() {
             ): Boolean {
 
                 val popup = WebView(this@MainActivity)
-
                 configurePopupWebView(popup)
 
                 popupWebView = popup
-
                 webContainer.removeView(webView)
 
                 webContainer.addView(
@@ -391,7 +403,6 @@ class MainActivity : Activity() {
                 resultMsg.sendToTarget()
 
                 status.text = "Status: otwarto nowe okno"
-
                 return true
             }
         }
@@ -461,13 +472,16 @@ class MainActivity : Activity() {
         markerView.clearPoint()
 
         status.text = "Status: analiza uruchomiona"
-
-        scanStatus.text = "Analiza: oczekiwanie na pierwszy skan"
+        scanStatus.text = "Analiza: rozpoczęto"
 
         handler.removeCallbacks(scanRunnable)
-        handler.post(scanRunnable)
 
         scanPage()
+
+        handler.postDelayed(
+            scanRunnable,
+            selectedInterval().toLong()
+        )
     }
 
     private fun stopAnalysis() {
@@ -507,8 +521,7 @@ class MainActivity : Activity() {
                 active.height,
                 Bitmap.Config.ARGB_8888
             ).also { image ->
-                val canvas = Canvas(image)
-                active.draw(canvas)
+                active.draw(Canvas(image))
             }
         } catch (e: Exception) {
             scanInProgress = false
@@ -544,14 +557,234 @@ class MainActivity : Activity() {
                     showBasicResult(result)
                 } else {
                     markerView.clearPoint()
-
-                    scanStatus.text =
-                        "MYSTRAS: ${result.message}\n" +
-                        "Automatyczne rozpoznawanie Mystras nie jest jeszcze aktywne."
+                    scanStatus.text = result.message
                 }
             }
         }.start()
     }
+
+    // --------------------------------------------------
+    // MYSTRAS - POBIERANIE GRAFIK Z OFICJALNEJ BIBLIOTEKI
+    // --------------------------------------------------
+
+    private fun analyzeMystras(
+        bitmap: Bitmap,
+        target: String
+    ): AnalysisResult {
+
+        val cached = mystrasReportCache
+
+        if (cached != null) {
+            return AnalysisResult(
+                emptyList(),
+                cached,
+                bitmap.width,
+                bitmap.height
+            )
+        }
+
+        val report = StringBuilder()
+
+        report.append("ANALIZA WZORCÓW MYSTRAS\n")
+        report.append("WYBRANY SUROWIEC: $target\n")
+        report.append("OBRAZ GRY: ${bitmap.width}x${bitmap.height}\n\n")
+
+        report.append("POBIERANIE GRAFIK Z BIBLIOTEKI...\n\n")
+
+        for ((name, id) in mystrasItems) {
+
+            report.append("--------------------------------\n")
+            report.append("SUROWIEC: $name\n")
+            report.append("ID: $id\n")
+
+            try {
+                val pageUrl =
+                    "https://warofdragons.com/artifact_info.php?artikul_id=$id"
+
+                val html = downloadText(pageUrl)
+
+                if (html.isBlank()) {
+                    report.append("BŁĄD: pusta strona przedmiotu\n\n")
+                    continue
+                }
+
+                // Pobieramy adresy obrazów ze znaczników IMG.
+                val imageTags = Regex(
+                    """(?is)<img\b[^>]*>"""
+                ).findAll(html)
+
+                val imageUrls = linkedSetOf<String>()
+
+                for (tag in imageTags) {
+
+                    val srcMatch = Regex(
+                        """(?is)(?:src|data-src)\s*=\s*["']([^"']+)["']"""
+                    ).find(tag.value) ?: continue
+
+                    val rawUrl = srcMatch.groupValues[1]
+                        .replace("&amp;", "&")
+
+                    val fullUrl = when {
+                        rawUrl.startsWith("http://") ||
+                        rawUrl.startsWith("https://") -> rawUrl
+
+                        rawUrl.startsWith("//") ->
+                            "https:$rawUrl"
+
+                        rawUrl.startsWith("/") ->
+                            "https://warofdragons.com$rawUrl"
+
+                        else ->
+                            "https://warofdragons.com/$rawUrl"
+                    }
+
+                    imageUrls.add(fullUrl)
+                }
+
+                report.append(
+                    "ZNALEZIONE ADRESY GRAFIK: ${imageUrls.size}\n"
+                )
+
+                if (imageUrls.isEmpty()) {
+                    report.append("Nie znaleziono znaczników IMG.\n\n")
+                    continue
+                }
+
+                var checked = 0
+
+                for (imageUrl in imageUrls) {
+
+                    if (checked >= 20) break
+
+                    try {
+                        val dimensions = getImageDimensions(imageUrl)
+
+                        if (dimensions != null) {
+
+                            report.append(
+                                "${checked + 1}. " +
+                                "${dimensions.first}x${dimensions.second}\n"
+                            )
+
+                            report.append("$imageUrl\n")
+
+                            checked++
+                        }
+
+                    } catch (e: Exception) {
+                        report.append(
+                            "Błąd obrazu: ${e.message}\n"
+                        )
+                    }
+                }
+
+                report.append(
+                    "SPRAWDZONE GRAFIKI: $checked\n\n"
+                )
+
+            } catch (e: Exception) {
+                report.append(
+                    "BŁĄD POBIERANIA: ${e.message}\n\n"
+                )
+            }
+        }
+
+        report.append("--------------------------------\n")
+        report.append("KONIEC ODCZYTU BIBLIOTEKI\n\n")
+        report.append(
+            "To jest etap przygotowania wzorców. " +
+            "Rozpoznawanie ikon na mapie Mystras nie jest jeszcze aktywne."
+        )
+
+        val finalReport = report.toString()
+
+        mystrasReportCache = finalReport
+
+        return AnalysisResult(
+            detections = emptyList(),
+            message = finalReport,
+            imageWidth = bitmap.width,
+            imageHeight = bitmap.height
+        )
+    }
+
+    private fun downloadText(address: String): String {
+        val connection =
+            URL(address).openConnection() as HttpURLConnection
+
+        try {
+            connection.connectTimeout = 12000
+            connection.readTimeout = 12000
+            connection.requestMethod = "GET"
+
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0"
+            )
+
+            connection.setRequestProperty(
+                "Accept",
+                "text/html,application/xhtml+xml"
+            )
+
+            return connection.inputStream
+                .bufferedReader(Charsets.UTF_8)
+                .use { it.readText() }
+
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun getImageDimensions(
+        address: String
+    ): Pair<Int, Int>? {
+
+        val connection =
+            URL(address).openConnection() as HttpURLConnection
+
+        try {
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.requestMethod = "GET"
+
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0"
+            )
+
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+
+            connection.inputStream.use { input ->
+                BitmapFactory.decodeStream(
+                    input,
+                    null,
+                    options
+                )
+            }
+
+            if (
+                options.outWidth <= 0 ||
+                options.outHeight <= 0
+            ) {
+                return null
+            }
+
+            return Pair(
+                options.outWidth,
+                options.outHeight
+            )
+
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    // --------------------------------------------------
+    // WYNIKI ANALIZY RYB PODSTAWOWYCH
+    // --------------------------------------------------
 
     private fun showBasicResult(result: AnalysisResult) {
         val target = targetSpinner.selectedItem?.toString() ?: ""
@@ -564,17 +797,28 @@ class MainActivity : Activity() {
 
         report.append("TRYB: RYBY PODSTAWOWE\n")
         report.append("WYBRANY KOLOR: $target\n")
-        report.append("OBRAZ: ${result.imageWidth}x${result.imageHeight}\n")
-        report.append("WYKRYTE OBSZARY: ${result.detections.size}\n")
-        report.append("OBSZARY WYBRANEGO KOLORU: ${matching.size}\n\n")
+        report.append(
+            "OBRAZ: ${result.imageWidth}x${result.imageHeight}\n"
+        )
+        report.append(
+            "WYKRYTE OBSZARY: ${result.detections.size}\n"
+        )
+        report.append(
+            "OBSZARY WYBRANEGO KOLORU: ${matching.size}\n\n"
+        )
 
         if (matching.isEmpty()) {
+
             markerView.clearPoint()
 
-            report.append("NIE ZNALEZIONO OBSZARU WYBRANEGO KOLORU.\n")
+            report.append(
+                "NIE ZNALEZIONO OBSZARU WYBRANEGO KOLORU.\n"
+            )
+
             report.append(result.message)
 
         } else {
+
             val selected = matching.random()
 
             markerView.setPoint(
@@ -584,29 +828,25 @@ class MainActivity : Activity() {
 
             report.append("LOSOWO WYBRANE WYKRYCIE:\n")
             report.append("KOLOR: ${selected.colorName}\n")
-            report.append("POZYCJA: X=${selected.centerX}, Y=${selected.centerY}\n")
-            report.append("ROZMIAR: ${selected.width}x${selected.height}\n")
-            report.append("PIKSELE OBSZARU: ${selected.pixelCount}\n\n")
+            report.append(
+                "POZYCJA: X=${selected.centerX}, Y=${selected.centerY}\n"
+            )
+            report.append(
+                "ROZMIAR: ${selected.width}x${selected.height}\n"
+            )
+            report.append(
+                "PIKSELE OBSZARU: ${selected.pixelCount}\n\n"
+            )
 
-            report.append("POZOSTAŁE WYKRYCIA WYBRANEGO KOLORU:\n")
-
-            matching.forEachIndexed { index, detection ->
-                report.append(
-                    "${index + 1}. ${detection.colorName} " +
-                    "X=${detection.centerX}, Y=${detection.centerY} " +
-                    "${detection.width}x${detection.height} " +
-                    "piksele=${detection.pixelCount}\n"
-                )
-            }
-
-            report.append("\nCZERWONY ZNACZNIK OZNACZA WYBRANY OBSZAR.")
-            report.append("\nBOT NIE KLIKA W GRZE.")
+            report.append(
+                "CZERWONY ZNACZNIK OZNACZA WYBRANY OBSZAR.\n"
+            )
+            report.append("BOT NIE KLIKA W GRZE.")
         }
 
         scanStatus.text = report.toString()
     }
-
-    private data class Detection(
+       private data class Detection(
         val colorId: Int,
         val colorName: String,
         val centerX: Int,
@@ -623,15 +863,9 @@ class MainActivity : Activity() {
         val imageHeight: Int = 0
     )
 
-    private fun analyzeMystras(
-        bitmap: Bitmap,
-        target: String
-    ): AnalysisResult {
-        return AnalysisResult(
-            emptyList(),
-            "Wybrany cel: $target. Rozpoznawanie obrazów Mystras wymaga osobnego wzorca."
-        )
-    }
+    // --------------------------------------------------
+    // ANALIZA KOLORÓW - RYBY PODSTAWOWE
+    // --------------------------------------------------
 
     private fun analyzeBitmap(
         bitmap: Bitmap,
@@ -656,10 +890,8 @@ class MainActivity : Activity() {
                 val x = min(gx * step, width - 1)
                 val y = min(gy * step, height - 1)
 
-                val pixel = bitmap.getPixel(x, y)
-
                 colorGrid[gy * gridWidth + gx] =
-                    classifyColor(pixel)
+                    classifyColor(bitmap.getPixel(x, y))
             }
         }
 
@@ -757,7 +989,8 @@ class MainActivity : Activity() {
             imageHeight = height
         )
     }
-        private fun classifyColor(pixel: Int): Int {
+
+    private fun classifyColor(pixel: Int): Int {
 
         val hsv = FloatArray(3)
 
@@ -810,6 +1043,10 @@ class MainActivity : Activity() {
         }
     }
 
+    // --------------------------------------------------
+    // CZERWONY ZNACZNIK
+    // --------------------------------------------------
+
     private inner class MarkerView(context: Context) :
         View(context) {
 
@@ -839,7 +1076,6 @@ class MainActivity : Activity() {
             paint.strokeWidth = 4f
             paint.style = Paint.Style.STROKE
 
-            // Czerwone kółko
             canvas.drawCircle(
                 pointX,
                 pointY,
@@ -847,7 +1083,6 @@ class MainActivity : Activity() {
                 paint
             )
 
-            // Pozioma linia
             canvas.drawLine(
                 pointX - 18f,
                 pointY,
@@ -856,7 +1091,6 @@ class MainActivity : Activity() {
                 paint
             )
 
-            // Pionowa linia
             canvas.drawLine(
                 pointX,
                 pointY - 18f,
@@ -868,6 +1102,10 @@ class MainActivity : Activity() {
             paint.style = Paint.Style.FILL
         }
     }
+
+    // --------------------------------------------------
+    // POWRÓT I ZAMYKANIE APLIKACJI
+    // --------------------------------------------------
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
@@ -899,9 +1137,10 @@ class MainActivity : Activity() {
 
             webView.stopLoading()
             webView.destroy()
+
         } catch (_: Exception) {
         }
 
         super.onDestroy()
     }
-}
+} 
