@@ -363,10 +363,10 @@ class MainActivity : Activity() {
             isFillViewport = true
             addView(
                 scanStatus,
-                ScrollView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
+               LinearLayout.LayoutParams(
+    ViewGroup.LayoutParams.MATCH_PARENT,
+    ViewGroup.LayoutParams.WRAP_CONTENT
+)
             )
         }
 
