@@ -284,50 +284,181 @@ class MainActivity : Activity() {
         val javascript = """
             (function() {
 
+                var all = document.querySelectorAll('*');
+                var images = document.querySelectorAll('img');
+                var canvases = document.querySelectorAll('canvas');
+                var svgs = document.querySelectorAll('svg');
+                var iframes = document.querySelectorAll('iframe');
                 var selects = document.querySelectorAll('select');
-                var filters = [];
 
-                for (var i = 0; i < selects.length; i++) {
+                var visible = 0;
+                var clickable = 0;
+                var candidates = [];
+                var imageInfo = [];
+                var canvasInfo = [];
+                var svgInfo = [];
+                var selectInfo = [];
 
-                    var select = selects[i];
-                    var options = [];
+                function isVisible(el) {
+                    var r = el.getBoundingClientRect();
+                    var s = window.getComputedStyle(el);
 
-                    for (var j = 0; j < select.options.length; j++) {
-
-                        options.push({
-                            text: select.options[j].text,
-                            value: select.options[j].value,
-                            selected: select.options[j].selected
-                        });
-                    }
-
-                    filters.push({
-                        name: select.name || "",
-                        id: select.id || "",
-                        value: select.value || "",
-                        options: options
-                    });
+                    return r.width > 0 &&
+                           r.height > 0 &&
+                           s.display !== 'none' &&
+                           s.visibility !== 'hidden' &&
+                           s.opacity !== '0';
                 }
 
-                var canvases = document.querySelectorAll('canvas');
-                var canvasInfo = [];
+                for (var i = 0; i < all.length; i++) {
 
-                for (var k = 0; k < canvases.length; k++) {
+                    var el = all[i];
 
-                    var rect = canvases[k].getBoundingClientRect();
+                    if (isVisible(el)) visible++;
 
-                    canvasInfo.push({
-                        width: canvases[k].width,
-                        height: canvases[k].height,
+                    if (
+                        el.tagName === 'BUTTON' ||
+                        el.tagName === 'A' ||
+                        el.onclick ||
+                        el.getAttribute('role') === 'button'
+                    ) {
+                        clickable++;
+                    }
+
+                    if (candidates.length < 30) {
+
+                        var text = (
+                            (el.innerText || '') + ' ' +
+                            (el.title || '') + ' ' +
+                            (el.getAttribute('alt') || '') + ' ' +
+                            (el.id || '') + ' ' +
+                            (typeof el.className === 'string' ? el.className : '')
+                        ).trim();
+
+                        if (
+                            text &&
+                            /ryb|fish|surow|resource|poziom|level|woda/i.test(text)
+                        ) {
+                            candidates.push({
+                                tag: el.tagName,
+                                text: text.substring(0, 120),
+                                id: el.id || '',
+                                className: typeof el.className === 'string'
+                                    ? el.className.substring(0, 100)
+                                    : ''
+                            });
+                        }
+                    }
+                }
+
+                for (var j = 0; j < images.length; j++) {
+
+                    var img = images[j];
+                    var rect = img.getBoundingClientRect();
+
+                    imageInfo.push({
+                        src: (img.src || '').substring(0, 180),
+                        width: img.naturalWidth,
+                        height: img.naturalHeight,
+                        visible: isVisible(img),
                         screenWidth: Math.round(rect.width),
                         screenHeight: Math.round(rect.height)
                     });
                 }
 
+                for (var k = 0; k < canvases.length; k++) {
+
+                    var canvas = canvases[k];
+                    var rect = canvas.getBoundingClientRect();
+
+                    canvasInfo.push({
+                        width: canvas.width,
+                        height: canvas.height,
+                        screenWidth: Math.round(rect.width),
+                        screenHeight: Math.round(rect.height),
+                        visible: isVisible(canvas),
+                        id: canvas.id || '',
+                        className: typeof canvas.className === 'string'
+                            ? canvas.className
+                            : ''
+                    });
+                }
+
+                for (var m = 0; m < svgs.length; m++) {
+
+                    var svg = svgs[m];
+                    var rect = svg.getBoundingClientRect();
+
+                    svgInfo.push({
+                        width: Math.round(rect.width),
+                        height: Math.round(rect.height),
+                        visible: isVisible(svg),
+                        id: svg.id || ''
+                    });
+                }
+
+                for (var n = 0; n < selects.length; n++) {
+
+                    var select = selects[n];
+                    var options = [];
+
+                    for (var p = 0; p < select.options.length; p++) {
+                        options.push({
+                            text: select.options[p].text,
+                            value: select.options[p].value,
+                            selected: select.options[p].selected
+                        });
+                    }
+
+                    selectInfo.push({
+                        name: select.name || '',
+                        id: select.id || '',
+                        value: select.value || '',
+                        options: options
+                    });
+                }
+
+                var bodyText = document.body
+                    ? (document.body.innerText || '').substring(0, 600)
+                    : '';
+
+                var resources = performance.getEntriesByType('resource');
+                var resourceUrls = [];
+
+                for (var q = 0; q < resources.length && resourceUrls.length < 20; q++) {
+
+                    var url = resources[q].name || '';
+
+                    if (/game|map|fish|resource|image|sprite|webgl|canvas/i.test(url)) {
+                        resourceUrls.push(url.substring(0, 180));
+                    }
+                }
+
                 return {
-                    selects: filters,
+                    url: location.href,
+                    title: document.title,
+                    ready: document.readyState,
+
+                    totalElements: all.length,
+                    visibleElements: visible,
+                    clickableElements: clickable,
+
+                    imageCount: images.length,
+                    images: imageInfo,
+
                     canvasCount: canvases.length,
-                    canvases: canvasInfo
+                    canvases: canvasInfo,
+
+                    svgCount: svgs.length,
+                    svgs: svgInfo,
+
+                    iframeCount: iframes.length,
+                    selectCount: selects.length,
+                    selects: selectInfo,
+
+                    candidates: candidates,
+                    bodyText: bodyText,
+                    resources: resourceUrls
                 };
 
             })();
@@ -348,100 +479,141 @@ class MainActivity : Activity() {
 
                 val output = StringBuilder()
 
-                output.append("SKAN: $scanCount\n")
-                output.append("ODSTĘP: 20 SEKUND\n\n")
+                output.append("SKAN NR: $scanCount\n")
+                output.append("ANALIZA STRONY ZAKONCZONA\n\n")
 
-                val selects = data.optJSONArray("selects")
+                output.append("STRONA:\n")
+                output.append("Tytuł: ${data.optString("title")}\n")
+                output.append("Stan: ${data.optString("ready")}\n")
+                output.append("Adres: ${data.optString("url")}\n\n")
 
-                if (selects != null && selects.length() > 0) {
+                output.append("ELEMENTY STRONY:\n")
+                output.append("Wszystkie: ${data.optInt("totalElements")}\n")
+                output.append("Widoczne: ${data.optInt("visibleElements")}\n")
+                output.append("Klikalne: ${data.optInt("clickableElements")}\n\n")
 
-                    output.append("LISTY ROZWIJANE GRY:\n\n")
+                output.append("OBRAZY:\n")
+                output.append("Liczba obrazów: ${data.optInt("imageCount")}\n")
 
-                    for (i in 0 until selects.length()) {
+                val images = data.optJSONArray("images")
 
-                        val filter = selects.getJSONObject(i)
+                if (images != null) {
+                    for (i in 0 until images.length()) {
 
-                        output.append("LISTA ${i + 1}\n")
+                        val img = images.getJSONObject(i)
+
                         output.append(
-                            "Nazwa: ${filter.optString("name")}\n"
+                            "${i + 1}. ${img.optInt("width")}x${img.optInt("height")} " +
+                            "widoczny: ${img.optBoolean("visible")}\n"
                         )
+
                         output.append(
-                            "ID: ${filter.optString("id")}\n"
+                            "   ${img.optString("src")}\n"
                         )
-                        output.append(
-                            "Wybrana wartość: ${filter.optString("value")}\n"
-                        )
-
-                        val options = filter.optJSONArray("options")
-
-                        if (options != null) {
-
-                            output.append("Dostępne poziomy:\n")
-
-                            for (j in 0 until options.length()) {
-
-                                val option = options.getJSONObject(j)
-
-                                val selected =
-                                    if (option.optBoolean("selected")) {
-                                        " <-- WYBRANE"
-                                    } else {
-                                        ""
-                                    }
-
-                                output.append(
-                                    "- ${option.optString("text")} " +
-                                    "(wartość: ${option.optString("value")})" +
-                                    selected + "\n"
-                                )
-                            }
-                        }
-
-                        output.append("\n")
                     }
-
-                } else {
-
-                    output.append(
-                        "Nie znaleziono list rozwijanych HTML.\n"
-                    )
                 }
 
-                val canvasCount = data.optInt("canvasCount")
-
-                output.append("\nOBSZAR GRY:\n")
-                output.append("Liczba Canvas: $canvasCount\n")
+                output.append("\nOBSZARY CANVAS:\n")
+                output.append("Liczba: ${data.optInt("canvasCount")}\n")
 
                 val canvases = data.optJSONArray("canvases")
 
                 if (canvases != null) {
-
                     for (i in 0 until canvases.length()) {
 
                         val canvas = canvases.getJSONObject(i)
 
                         output.append(
-                            "Canvas ${i + 1}: " +
-                            "${canvas.optInt("width")} x " +
-                            "${canvas.optInt("height")}\n"
+                            "${i + 1}. ${canvas.optInt("width")}x" +
+                            "${canvas.optInt("height")} " +
+                            "widoczny: ${canvas.optBoolean("visible")}\n"
                         )
                     }
                 }
 
-                output.append(
-                    "\nSkan diagnostyczny zakończony. " +
-                    "Wykrywanie kółek wymaga ustalenia sposobu " +
-                    "rysowania znaczników przez grę."
-                )
+                output.append("\nELEMENTY SVG:\n")
+                output.append("Liczba: ${data.optInt("svgCount")}\n")
+
+                output.append("\nRAMKI I LISTY:\n")
+                output.append("IFRAME: ${data.optInt("iframeCount")}\n")
+                output.append("LISTY: ${data.optInt("selectCount")}\n")
+
+                val selects = data.optJSONArray("selects")
+
+                if (selects != null) {
+
+                    for (i in 0 until selects.length()) {
+
+                        val select = selects.getJSONObject(i)
+
+                        output.append(
+                            "\nLista ${i + 1}: ${select.optString("name")}\n"
+                        )
+
+                        val options = select.optJSONArray("options")
+
+                        if (options != null) {
+
+                            for (j in 0 until options.length()) {
+
+                                val option = options.getJSONObject(j)
+
+                                output.append(
+                                    "- ${option.optString("text")} " +
+                                    "(${option.optString("value")})\n"
+                                )
+                            }
+                        }
+                    }
+                }
+
+                output.append("\nMOŻLIWE ELEMENTY SUROWCÓW:\n")
+
+                val candidates = data.optJSONArray("candidates")
+
+                if (candidates != null && candidates.length() > 0) {
+
+                    for (i in 0 until candidates.length()) {
+
+                        val item = candidates.getJSONObject(i)
+
+                        output.append(
+                            "${i + 1}. ${item.optString("tag")} " +
+                            "${item.optString("text")}\n"
+                        )
+                    }
+
+                } else {
+                    output.append("Nie znaleziono nazw surowców w HTML.\n")
+                }
+
+                output.append("\nZASOBY GRY:\n")
+
+                val resources = data.optJSONArray("resources")
+
+                if (resources != null && resources.length() > 0) {
+
+                    for (i in 0 until resources.length()) {
+                        output.append(
+                            "${i + 1}. ${resources.getString(i)}\n"
+                        )
+                    }
+
+                } else {
+                    output.append("Brak pasujących adresów zasobów.\n")
+                }
+
+                output.append("\nTEKST STRONY:\n")
+                output.append(data.optString("bodyText"))
+
+                output.append("\n\nKOLEJNY SKAN ZA 20 SEKUND.")
 
                 scanStatus.text = output.toString()
-
                 status.text = "ANALIZA AKTYWNA | SKAN: $scanCount"
 
             } catch (e: Exception) {
 
-                scanStatus.text =
-                    "Błąd analizy: ${e.message}"
+                scanStatus.text = "BŁĄD ANALIZY: ${e.message}"
 
             } finally {
 
