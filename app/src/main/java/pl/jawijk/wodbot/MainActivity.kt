@@ -10,6 +10,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
@@ -36,13 +37,15 @@ class MainActivity : Activity() {
     private lateinit var targetSpinner: Spinner
     private lateinit var intervalSpinner: Spinner
 
+    private lateinit var logScroll: ScrollView
+    private lateinit var logButton: Button
+
     private var popupWebView: WebView? = null
 
     private var running = false
     private var scanInProgress = false
     private var scanCount = 0
 
-    // Raport biblioteki Mystras pobieramy tylko raz.
     private var mystrasReportCache: String? = null
 
     private val basicTargets = arrayOf(
@@ -53,7 +56,6 @@ class MainActivity : Activity() {
         "Czerwony"
     )
 
-    // LISTY MYSTRAS NIE ZMIENIAMY
     private val mystrasTargets = arrayOf(
         "Golden Shams",
         "Mystras Serpentfish",
@@ -87,6 +89,63 @@ class MainActivity : Activity() {
         }
     }
 
+    // --------------------------------------------------
+    // WYGLĄD PRZYCISKÓW
+    // --------------------------------------------------
+
+    private fun buttonBackground(
+        color: Int,
+        borderColor: Int
+    ): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            setStroke(dp(1), borderColor)
+            cornerRadius = dp(5).toFloat()
+        }
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
+    private fun createControlButton(
+        label: String,
+        backgroundColor: Int,
+        borderColor: Int,
+        textColor: Int,
+        textSize: Float
+    ): Button {
+        return Button(this).apply {
+            text = label
+            this.textSize = textSize
+            setTextColor(textColor)
+            isAllCaps = false
+
+            background = buttonBackground(
+                backgroundColor,
+                borderColor
+            )
+
+            minHeight = 0
+            minimumHeight = 0
+            minWidth = 0
+            minimumWidth = 0
+
+            setPadding(
+                dp(3),
+                0,
+                dp(3),
+                0
+            )
+
+            stateListAnimator = null
+        }
+    }
+
+    // --------------------------------------------------
+    // START APLIKACJI
+    // --------------------------------------------------
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -99,10 +158,10 @@ class MainActivity : Activity() {
 
         val title = TextView(this).apply {
             text = "JAWIJK WOD BOT"
-            textSize = 21f
+            textSize = 19f
             setTextColor(Color.WHITE)
             gravity = android.view.Gravity.CENTER
-            setPadding(8, 12, 8, 12)
+            setPadding(8, 7, 8, 7)
         }
 
         root.addView(title)
@@ -119,9 +178,9 @@ class MainActivity : Activity() {
 
         val targetLabel = TextView(this).apply {
             text = "WYBRANY CEL:"
-            textSize = 13f
+            textSize = 12f
             setTextColor(Color.WHITE)
-            setPadding(8, 5, 8, 2)
+            setPadding(8, 3, 8, 1)
         }
 
         root.addView(targetLabel)
@@ -148,91 +207,128 @@ class MainActivity : Activity() {
         intervalSpinner.setSelection(2)
         root.addView(intervalSpinner)
 
-        // PANEL POWIĘKSZANIA
-        val zoomPanel = LinearLayout(this).apply {
+        // --------------------------------------------------
+        // ZWARTY PASEK STEROWANIA
+        // --------------------------------------------------
+
+        val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
-            setPadding(4, 5, 4, 5)
+            setPadding(dp(3), dp(3), dp(3), dp(3))
+            setBackgroundColor(Color.rgb(35, 35, 35))
         }
 
-        val zoomOut = Button(this).apply {
-            text = "−"
-            textSize = 20f
-            setOnClickListener {
-                activeWebView()?.zoomOut()
-            }
+        val zoomOut = createControlButton(
+            "−",
+            Color.rgb(225, 225, 225),
+            Color.GRAY,
+            Color.BLACK,
+            21f
+        )
+
+        zoomOut.setOnClickListener {
+            activeWebView()?.zoomOut()
         }
 
-        val zoomReset = Button(this).apply {
-            text = "100%"
-            setOnClickListener {
-                resetZoom()
-            }
+        val zoomReset = createControlButton(
+            "100%",
+            Color.rgb(210, 210, 210),
+            Color.GRAY,
+            Color.BLACK,
+            12f
+        )
+
+        zoomReset.setOnClickListener {
+            resetZoom()
         }
 
-        val zoomIn = Button(this).apply {
-            text = "+"
-            textSize = 20f
-            setOnClickListener {
-                activeWebView()?.zoomIn()
-            }
+        val zoomIn = createControlButton(
+            "+",
+            Color.rgb(225, 225, 225),
+            Color.GRAY,
+            Color.BLACK,
+            21f
+        )
+
+        zoomIn.setOnClickListener {
+            activeWebView()?.zoomIn()
         }
 
-        zoomPanel.addView(
+        val startButton = createControlButton(
+            "START",
+            Color.rgb(25, 135, 65),
+            Color.rgb(100, 220, 130),
+            Color.WHITE,
+            13f
+        )
+
+        startButton.setOnClickListener {
+            startAnalysis()
+        }
+
+        val stopButton = createControlButton(
+            "STOP",
+            Color.rgb(180, 35, 35),
+            Color.rgb(240, 100, 100),
+            Color.WHITE,
+            13f
+        )
+
+        stopButton.setOnClickListener {
+            stopAnalysis()
+        }
+
+        val controlHeight = dp(40)
+
+        controls.addView(
             zoomOut,
-            LinearLayout.LayoutParams(0, 48, 1f)
+            LinearLayout.LayoutParams(0, controlHeight, 0.8f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
+            }
         )
 
-        zoomPanel.addView(
+        controls.addView(
             zoomReset,
-            LinearLayout.LayoutParams(0, 48, 1f)
+            LinearLayout.LayoutParams(0, controlHeight, 1f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
+            }
         )
 
-        zoomPanel.addView(
+        controls.addView(
             zoomIn,
-            LinearLayout.LayoutParams(0, 48, 1f)
+            LinearLayout.LayoutParams(0, controlHeight, 0.8f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
+            }
         )
 
-        root.addView(zoomPanel)
+        controls.addView(
+            startButton,
+            LinearLayout.LayoutParams(0, controlHeight, 1.3f).apply {
+                setMargins(dp(3), 0, dp(2), 0)
+            }
+        )
+
+        controls.addView(
+            stopButton,
+            LinearLayout.LayoutParams(0, controlHeight, 1.3f).apply {
+                setMargins(dp(2), 0, dp(3), 0)
+            }
+        )
+
+        root.addView(controls)
 
         status = TextView(this).apply {
             text = "Status: gotowy"
-            textSize = 13f
+            textSize = 12f
             setTextColor(Color.GREEN)
-            setPadding(8, 5, 8, 5)
+            setPadding(8, 3, 8, 3)
         }
 
         root.addView(status)
 
-        val buttons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        val startButton = Button(this).apply {
-            text = "START"
-            setOnClickListener {
-                startAnalysis()
-            }
-        }
-
-        val stopButton = Button(this).apply {
-            text = "STOP"
-            setOnClickListener {
-                stopAnalysis()
-            }
-        }
-
-        buttons.addView(
-            startButton,
-            LinearLayout.LayoutParams(0, 52, 1f)
-        )
-
-        buttons.addView(
-            stopButton,
-            LinearLayout.LayoutParams(0, 52, 1f)
-        )
-
-        root.addView(buttons)
+        // --------------------------------------------------
+        // OKNO GRY
+        // --------------------------------------------------
 
         webContainer = FrameLayout(this)
 
@@ -269,15 +365,63 @@ class MainActivity : Activity() {
                 1f
             )
         )
+               // --------------------------------------------------
+        // ZWIJANY LOG ANALIZY
+        // --------------------------------------------------
 
         scanStatus = TextView(this).apply {
             text = "Analiza: oczekiwanie na START"
             textSize = 12f
             setTextColor(Color.WHITE)
-            setPadding(8, 8, 8, 8)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
         }
 
-        root.addView(scanStatus)
+        logButton = createControlButton(
+            "POKAŻ LOG",
+            Color.rgb(55, 65, 75),
+            Color.GRAY,
+            Color.WHITE,
+            12f
+        )
+
+        logScroll = ScrollView(this).apply {
+            visibility = View.GONE
+            isFillViewport = true
+
+            addView(
+                scanStatus,
+                ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+
+        logButton.setOnClickListener {
+            if (logScroll.visibility == View.VISIBLE) {
+                logScroll.visibility = View.GONE
+                logButton.text = "POKAŻ LOG"
+            } else {
+                logScroll.visibility = View.VISIBLE
+                logButton.text = "UKRYJ LOG"
+            }
+        }
+
+        root.addView(
+            logButton,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(34)
+            )
+        )
+
+        root.addView(
+            logScroll,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(110)
+            )
+        )
 
         setContentView(root)
 
@@ -314,6 +458,10 @@ class MainActivity : Activity() {
         webView.loadUrl("https://warofdragons.com/")
     }
 
+    // --------------------------------------------------
+    // WYBÓR CELU
+    // --------------------------------------------------
+
     private fun updateTargets() {
         val items =
             if (categorySpinner.selectedItemPosition == 0) {
@@ -333,6 +481,10 @@ class MainActivity : Activity() {
         return popupWebView ?: webView
     }
 
+    // --------------------------------------------------
+    // POWIĘKSZANIE
+    // --------------------------------------------------
+
     private fun resetZoom() {
         val active = activeWebView() ?: return
 
@@ -343,6 +495,10 @@ class MainActivity : Activity() {
         active.settings.textZoom = 100
         status.text = "Status: powiększenie przywrócone"
     }
+
+    // --------------------------------------------------
+    // KONFIGURACJA WEBVIEW
+    // --------------------------------------------------
 
     private fun configureWebView(view: WebView) {
         view.settings.apply {
@@ -407,7 +563,8 @@ class MainActivity : Activity() {
             }
         }
     }
-        private fun configurePopupWebView(popup: WebView) {
+
+    private fun configurePopupWebView(popup: WebView) {
         popup.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -441,6 +598,10 @@ class MainActivity : Activity() {
         }
     }
 
+    // --------------------------------------------------
+    // ZAMYKANIE OKNA POPUP
+    // --------------------------------------------------
+
     private fun closePopup() {
         val popup = popupWebView ?: return
 
@@ -462,6 +623,10 @@ class MainActivity : Activity() {
 
         status.text = "Status: powrót do głównego okna"
     }
+
+    // --------------------------------------------------
+    // START I STOP ANALIZY
+    // --------------------------------------------------
 
     private fun startAnalysis() {
         if (running) return
@@ -501,6 +666,10 @@ class MainActivity : Activity() {
 
         return intervalValues[position] * 1000
     }
+
+    // --------------------------------------------------
+    // POBIERANIE OBRAZU GRY I ANALIZA
+    // --------------------------------------------------
 
     private fun scanPage() {
         if (!running || scanInProgress) return
@@ -564,7 +733,7 @@ class MainActivity : Activity() {
     }
 
     // --------------------------------------------------
-    // MYSTRAS - POBIERANIE GRAFIK Z OFICJALNEJ BIBLIOTEKI
+    // MYSTRAS - POBIERANIE GRAFIK Z BIBLIOTEKI
     // --------------------------------------------------
 
     private fun analyzeMystras(
@@ -608,7 +777,6 @@ class MainActivity : Activity() {
                     continue
                 }
 
-                // Pobieramy adresy obrazów ze znaczników IMG.
                 val imageTags = Regex(
                     """(?is)<img\b[^>]*>"""
                 ).findAll(html)
@@ -660,7 +828,6 @@ class MainActivity : Activity() {
                         val dimensions = getImageDimensions(imageUrl)
 
                         if (dimensions != null) {
-
                             report.append(
                                 "${checked + 1}. " +
                                 "${dimensions.first}x${dimensions.second}\n"
@@ -707,6 +874,9 @@ class MainActivity : Activity() {
             imageHeight = bitmap.height
         )
     }
+        // --------------------------------------------------
+    // POBIERANIE STRONY INTERNETOWEJ
+    // --------------------------------------------------
 
     private fun downloadText(address: String): String {
         val connection =
@@ -846,7 +1016,12 @@ class MainActivity : Activity() {
 
         scanStatus.text = report.toString()
     }
-       private data class Detection(
+
+    // --------------------------------------------------
+    // STRUKTURY WYNIKÓW
+    // --------------------------------------------------
+
+    private data class Detection(
         val colorId: Int,
         val colorName: String,
         val centerX: Int,
@@ -989,6 +1164,10 @@ class MainActivity : Activity() {
             imageHeight = height
         )
     }
+
+    // --------------------------------------------------
+    // ROZPOZNAWANIE KOLORÓW
+    // --------------------------------------------------
 
     private fun classifyColor(pixel: Int): Int {
 
@@ -1143,4 +1322,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-} 
+}
