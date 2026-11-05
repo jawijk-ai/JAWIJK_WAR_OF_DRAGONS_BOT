@@ -5,6 +5,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -12,7 +15,10 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import org.json.JSONArray
+import org.json.JSONObject
+import java.util.ArrayDeque
+import kotlin.math.max
+import kotlin.math.min
 
 class MainActivity : Activity() {
 
@@ -25,8 +31,8 @@ class MainActivity : Activity() {
     private var popupWebView: WebView? = null
 
     private var running = false
-    private var scanCount = 0
     private var scanInProgress = false
+    private var scanCount = 0
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -51,21 +57,16 @@ class MainActivity : Activity() {
         status.setPadding(8, 8, 8, 8)
         layout.addView(status)
 
-        val categoryTitle = TextView(this)
-        categoryTitle.text = "KATEGORIA SUROWCÓW:"
-        layout.addView(categoryTitle)
+        val title = TextView(this)
+        title.text = "KATEGORIA SUROWCÓW:"
+        layout.addView(title)
 
         categorySpinner = Spinner(this)
-
-        val categories = arrayOf(
-            "Ryby podstawowe",
-            "Ryby Mystras"
-        )
 
         val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
-            categories
+            arrayOf("Ryby podstawowe", "Ryby Mystras")
         )
 
         adapter.setDropDownViewResource(
@@ -76,7 +77,6 @@ class MainActivity : Activity() {
         layout.addView(categorySpinner)
 
         webContainer = FrameLayout(this)
-
         webView = WebView(this)
 
         webContainer.addView(
@@ -101,14 +101,12 @@ class MainActivity : Activity() {
 
         val startButton = Button(this)
         startButton.text = "START"
-
         startButton.setOnClickListener {
             startAnalysis()
         }
 
         val stopButton = Button(this)
         stopButton.text = "STOP"
-
         stopButton.setOnClickListener {
             stopAnalysis()
         }
@@ -131,7 +129,7 @@ class MainActivity : Activity() {
 
         scanStatus = TextView(this)
         scanStatus.text = "Oczekiwanie na START..."
-        scanStatus.textSize = 11f
+        scanStatus.textSize = 12f
         scanStatus.setPadding(5, 5, 5, 5)
         scanStatus.setTextIsSelectable(true)
 
@@ -142,19 +140,17 @@ class MainActivity : Activity() {
             scroll,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                130
+                140
             )
         )
 
         setContentView(layout)
 
         configureWebView()
-
         webView.loadUrl("https://www.warofdragons.com/")
     }
 
     private fun configureWebView() {
-
         val settings = webView.settings
 
         settings.javaScriptEnabled = true
@@ -163,10 +159,8 @@ class MainActivity : Activity() {
         settings.loadsImagesAutomatically = true
         settings.javaScriptCanOpenWindowsAutomatically = true
         settings.setSupportMultipleWindows(true)
-
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
-
         settings.cacheMode = WebSettings.LOAD_DEFAULT
 
         CookieManager.getInstance().setAcceptCookie(true)
@@ -177,11 +171,7 @@ class MainActivity : Activity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
-
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
+            override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 status.text = "Strona gry załadowana"
             }
@@ -215,7 +205,6 @@ class MainActivity : Activity() {
 
                 popup.webViewClient = WebViewClient()
                 popup.webChromeClient = this
-
                 popupWebView = popup
 
                 webContainer.addView(
@@ -237,34 +226,31 @@ class MainActivity : Activity() {
             }
 
             override fun onCloseWindow(window: WebView?) {
-
                 if (window != null) {
                     webContainer.removeView(window)
                     window.destroy()
                 }
-
                 popupWebView = null
             }
         }
     }
         private fun startAnalysis() {
-
         if (running) return
 
         running = true
         scanInProgress = false
         scanCount = 0
 
-        scanStatus.text = "Rozpoczynam analizę..."
         status.text = "ANALIZA AKTYWNA"
+        scanStatus.text = "Przygotowanie analizy obrazu..."
 
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
     }
 
     private fun stopAnalysis() {
-
         running = false
+        scanInProgress = false
 
         handler.removeCallbacks(scanRunnable)
 
@@ -273,369 +259,357 @@ class MainActivity : Activity() {
     }
 
     private fun scanPage() {
-
         if (!running || scanInProgress) return
 
-        val activeWebView = popupWebView ?: webView
+        val active = popupWebView ?: webView
+
+        if (!active.isAttachedToWindow ||
+            active.width <= 0 ||
+            active.height <= 0
+        ) {
+            scanStatus.text = "WebView nie jest widoczny."
+            scheduleNextScan()
+            return
+        }
 
         scanInProgress = true
+        scanStatus.text = "SKAN W TOKU – analiza obrazu łowiska..."
 
-        val javascript = """
-            (function() {
+        try {
+            val bitmap = Bitmap.createBitmap(
+                active.width,
+                active.height,
+                Bitmap.Config.ARGB_8888
+            )
 
-                var all = document.querySelectorAll('*');
-                var images = document.querySelectorAll('img');
-                var canvases = document.querySelectorAll('canvas');
-                var svgs = document.querySelectorAll('svg');
-                var iframes = document.querySelectorAll('iframe');
-                var selects = document.querySelectorAll('select');
+            active.draw(Canvas(bitmap))
 
-                var visible = 0;
-                var clickable = 0;
-                var candidates = [];
-                var imageInfo = [];
-                var canvasInfo = [];
-                var svgInfo = [];
-                var selectInfo = [];
+            Thread {
+                try {
+                    val mode = categorySpinner.selectedItemPosition
+                    val result = analyzeBitmap(bitmap, mode)
 
-                function isVisible(el) {
-                    var r = el.getBoundingClientRect();
-                    var s = window.getComputedStyle(el);
+                    runOnUiThread {
+                        bitmap.recycle()
 
-                    return r.width > 0 &&
-                           r.height > 0 &&
-                           s.display !== 'none' &&
-                           s.visibility !== 'hidden' &&
-                           s.opacity !== '0';
-                }
+                        if (running) {
+                            scanCount++
 
-                for (var i = 0; i < all.length; i++) {
+                            status.text =
+                                "ANALIZA AKTYWNA | SKAN: $scanCount"
 
-                    var el = all[i];
+                            scanStatus.text = result
+                        }
 
-                    if (isVisible(el)) visible++;
-
-                    if (
-                        el.tagName === 'BUTTON' ||
-                        el.tagName === 'A' ||
-                        el.onclick ||
-                        el.getAttribute('role') === 'button'
-                    ) {
-                        clickable++;
+                        scanInProgress = false
+                        scheduleNextScan()
                     }
 
-                    if (candidates.length < 30) {
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        bitmap.recycle()
 
-                        var text = (
-                            (el.innerText || '') + ' ' +
-                            (el.title || '') + ' ' +
-                            (el.getAttribute('alt') || '') + ' ' +
-                            (el.id || '') + ' ' +
-                            (typeof el.className === 'string' ? el.className : '')
-                        ).trim();
+                        scanStatus.text =
+                            "BŁĄD ANALIZY OBRAZU: ${e.message}"
+
+                        scanInProgress = false
+                        scheduleNextScan()
+                    }
+                }
+            }.start()
+
+        } catch (e: Exception) {
+            scanStatus.text = "BŁĄD ZRZUTU EKRANU: ${e.message}"
+            scanInProgress = false
+            scheduleNextScan()
+        }
+    }
+
+    private fun scheduleNextScan() {
+        if (running) {
+            handler.removeCallbacks(scanRunnable)
+            handler.postDelayed(scanRunnable, 20000)
+        }
+    }
+
+    private data class Detection(
+        val colorName: String,
+        val x: Int,
+        val y: Int,
+        val pixels: Int,
+        val width: Int,
+        val height: Int
+    )
+
+    private fun analyzeBitmap(
+        bitmap: Bitmap,
+        mode: Int
+    ): String {
+
+        if (mode == 1) {
+            return analyzeMystras(bitmap)
+        }
+
+        val width = bitmap.width
+        val height = bitmap.height
+
+        // Próbkowanie co 2 piksele ogranicza obciążenie telefonu.
+        val step = 2
+        val gridWidth = width / step
+        val gridHeight = height / step
+
+        if (gridWidth < 5 || gridHeight < 5) {
+            return "Obraz łowiska jest za mały do analizy."
+        }
+
+        val colors = Array(gridHeight) {
+            IntArray(gridWidth)
+        }
+
+        for (gy in 0 until gridHeight) {
+            for (gx in 0 until gridWidth) {
+                val px = min(gx * step, width - 1)
+                val py = min(gy * step, height - 1)
+
+                colors[gy][gx] = classifyColor(
+                    bitmap.getPixel(px, py)
+                )
+            }
+        }
+
+        val visited = Array(gridHeight) {
+            BooleanArray(gridWidth)
+        }
+
+        val detections = mutableListOf<Detection>()
+
+        val dx = intArrayOf(1, -1, 0, 0, 1, 1, -1, -1)
+        val dy = intArrayOf(0, 0, 1, -1, 1, -1, 1, -1)
+
+        for (y in 0 until gridHeight) {
+            for (x in 0 until gridWidth) {
+
+                val colorId = colors[y][x]
+
+                if (colorId == 0 || visited[y][x]) continue
+
+                val queue = ArrayDeque<Int>()
+                queue.add(y * gridWidth + x)
+                visited[y][x] = true
+
+                var count = 0
+                var minX = x
+                var maxX = x
+                var minY = y
+                var maxY = y
+                var sumX = 0
+                var sumY = 0
+
+                while (queue.isNotEmpty()) {
+                    val point = queue.removeFirst()
+                    val cx = point % gridWidth
+                    val cy = point / gridWidth
+
+                    count++
+                    sumX += cx
+                    sumY += cy
+
+                    minX = min(minX, cx)
+                    maxX = max(maxX, cx)
+                    minY = min(minY, cy)
+                    maxY = max(maxY, cy)
+
+                    for (d in 0 until 8) {
+                        val nx = cx + dx[d]
+                        val ny = cy + dy[d]
 
                         if (
-                            text &&
-                            /ryb|fish|surow|resource|poziom|level|woda/i.test(text)
+                            nx in 0 until gridWidth &&
+                            ny in 0 until gridHeight &&
+                            !visited[ny][nx] &&
+                            colors[ny][nx] == colorId
                         ) {
-                            candidates.push({
-                                tag: el.tagName,
-                                text: text.substring(0, 120),
-                                id: el.id || '',
-                                className: typeof el.className === 'string'
-                                    ? el.className.substring(0, 100)
-                                    : ''
-                            });
+                            visited[ny][nx] = true
+                            queue.add(ny * gridWidth + nx)
                         }
                     }
                 }
 
-                for (var j = 0; j < images.length; j++) {
+                val boxWidth = maxX - minX + 1
+                val boxHeight = maxY - minY + 1
 
-                    var img = images[j];
-                    var rect = img.getBoundingClientRect();
+                // Odrzucenie bardzo małych plam i długich pasków.
+                val ratio =
+                    boxWidth.toFloat() / max(1, boxHeight).toFloat()
 
-                    imageInfo.push({
-                        src: (img.src || '').substring(0, 180),
-                        width: img.naturalWidth,
-                        height: img.naturalHeight,
-                        visible: isVisible(img),
-                        screenWidth: Math.round(rect.width),
-                        screenHeight: Math.round(rect.height)
-                    });
-                }
-
-                for (var k = 0; k < canvases.length; k++) {
-
-                    var canvas = canvases[k];
-                    var rect = canvas.getBoundingClientRect();
-
-                    canvasInfo.push({
-                        width: canvas.width,
-                        height: canvas.height,
-                        screenWidth: Math.round(rect.width),
-                        screenHeight: Math.round(rect.height),
-                        visible: isVisible(canvas),
-                        id: canvas.id || '',
-                        className: typeof canvas.className === 'string
-                            ? canvas.className
-                            : ''
-                    });
-                }
-
-                for (var m = 0; m < svgs.length; m++) {
-
-                    var svg = svgs[m];
-                    var rect = svg.getBoundingClientRect();
-
-                    svgInfo.push({
-                        width: Math.round(rect.width),
-                        height: Math.round(rect.height),
-                        visible: isVisible(svg),
-                        id: svg.id || ''
-                    });
-                }
-
-                for (var n = 0; n < selects.length; n++) {
-
-                    var select = selects[n];
-                    var options = [];
-
-                    for (var p = 0; p < select.options.length; p++) {
-                        options.push({
-                            text: select.options[p].text,
-                            value: select.options[p].value,
-                            selected: select.options[p].selected
-                        });
-                    }
-
-                    selectInfo.push({
-                        name: select.name || '',
-                        id: select.id || '',
-                        value: select.value || '',
-                        options: options
-                    });
-                }
-
-                var bodyText = document.body
-                    ? (document.body.innerText || '').substring(0, 600)
-                    : '';
-
-                var resources = performance.getEntriesByType('resource');
-                var resourceUrls = [];
-
-                for (var q = 0; q < resources.length && resourceUrls.length < 20; q++) {
-
-                    var url = resources[q].name || '';
-
-                    if (/game|map|fish|resource|image|sprite|webgl|canvas/i.test(url)) {
-                        resourceUrls.push(url.substring(0, 180));
-                    }
-                }
-
-                return {
-                    url: location.href,
-                    title: document.title,
-                    ready: document.readyState,
-
-                    totalElements: all.length,
-                    visibleElements: visible,
-                    clickableElements: clickable,
-
-                    imageCount: images.length,
-                    images: imageInfo,
-
-                    canvasCount: canvases.length,
-                    canvases: canvasInfo,
-
-                    svgCount: svgs.length,
-                    svgs: svgInfo,
-
-                    iframeCount: iframes.length,
-                    selectCount: selects.length,
-                    selects: selectInfo,
-
-                    candidates: candidates,
-                    bodyText: bodyText,
-                    resources: resourceUrls
-                };
-
-            })();
-        """.trimIndent()
-
-        activeWebView.evaluateJavascript(javascript) { result ->
-
-            try {
-
-                if (!running || result == null || result == "null") {
-                    return@evaluateJavascript
-                }
-
-                val data = JSONArray("[$result]")
-                    .getJSONObject(0)
-
-                scanCount++
-
-                val output = StringBuilder()
-
-                output.append("SKAN NR: $scanCount\n")
-                output.append("ANALIZA STRONY ZAKONCZONA\n\n")
-
-                output.append("STRONA:\n")
-                output.append("Tytuł: ${data.optString("title")}\n")
-                output.append("Stan: ${data.optString("ready")}\n")
-                output.append("Adres: ${data.optString("url")}\n\n")
-
-                output.append("ELEMENTY STRONY:\n")
-                output.append("Wszystkie: ${data.optInt("totalElements")}\n")
-                output.append("Widoczne: ${data.optInt("visibleElements")}\n")
-                output.append("Klikalne: ${data.optInt("clickableElements")}\n\n")
-
-                output.append("OBRAZY:\n")
-                output.append("Liczba obrazów: ${data.optInt("imageCount")}\n")
-
-                val images = data.optJSONArray("images")
-
-                if (images != null) {
-                    for (i in 0 until images.length()) {
-
-                        val img = images.getJSONObject(i)
-
-                        output.append(
-                            "${i + 1}. ${img.optInt("width")}x${img.optInt("height")} " +
-                            "widoczny: ${img.optBoolean("visible")}\n"
+                if (
+                    count >= 5 &&
+                    count <= 1800 &&
+                    ratio in 0.45f..2.2f
+                ) {
+                    detections.add(
+                        Detection(
+                            colorName(colorId),
+                            (sumX / count) * step,
+                            (sumY / count) * step,
+                            count,
+                            boxWidth * step,
+                            boxHeight * step
                         )
-
-                        output.append(
-                            "   ${img.optString("src")}\n"
-                        )
-                    }
-                }
-
-                output.append("\nOBSZARY CANVAS:\n")
-                output.append("Liczba: ${data.optInt("canvasCount")}\n")
-
-                val canvases = data.optJSONArray("canvases")
-
-                if (canvases != null) {
-                    for (i in 0 until canvases.length()) {
-
-                        val canvas = canvases.getJSONObject(i)
-
-                        output.append(
-                            "${i + 1}. ${canvas.optInt("width")}x" +
-                            "${canvas.optInt("height")} " +
-                            "widoczny: ${canvas.optBoolean("visible")}\n"
-                        )
-                    }
-                }
-                           output.append("\nELEMENTY SVG:\n")
-                output.append("Liczba: ${data.optInt("svgCount")}\n")
-
-                output.append("\nRAMKI I LISTY:\n")
-                output.append("IFRAME: ${data.optInt("iframeCount")}\n")
-                output.append("LISTY: ${data.optInt("selectCount")}\n")
-
-                val selects = data.optJSONArray("selects")
-
-                if (selects != null) {
-
-                    for (i in 0 until selects.length()) {
-
-                        val select = selects.getJSONObject(i)
-
-                        output.append(
-                            "\nLista ${i + 1}: ${select.optString("name")}\n"
-                        )
-
-                        val options = select.optJSONArray("options")
-
-                        if (options != null) {
-
-                            for (j in 0 until options.length()) {
-
-                                val option = options.getJSONObject(j)
-
-                                output.append(
-                                    "- ${option.optString("text")} " +
-                                    "(${option.optString("value")})\n"
-                                )
-                            }
-                        }
-                    }
-                }
-
-                output.append("\nMOŻLIWE ELEMENTY SUROWCÓW:\n")
-
-                val candidates = data.optJSONArray("candidates")
-
-                if (candidates != null && candidates.length() > 0) {
-
-                    for (i in 0 until candidates.length()) {
-
-                        val item = candidates.getJSONObject(i)
-
-                        output.append(
-                            "${i + 1}. ${item.optString("tag")} " +
-                            "${item.optString("text")}\n"
-                        )
-                    }
-
-                } else {
-                    output.append("Nie znaleziono nazw surowców w HTML.\n")
-                }
-
-                output.append("\nZASOBY GRY:\n")
-
-                val resources = data.optJSONArray("resources")
-
-                if (resources != null && resources.length() > 0) {
-
-                    for (i in 0 until resources.length()) {
-                        output.append(
-                            "${i + 1}. ${resources.getString(i)}\n"
-                        )
-                    }
-
-                } else {
-                    output.append("Brak pasujących adresów zasobów.\n")
-                }
-
-                output.append("\nTEKST STRONY:\n")
-                output.append(data.optString("bodyText"))
-
-                output.append("\n\nKOLEJNY SKAN ZA 20 SEKUND.")
-
-                scanStatus.text = output.toString()
-                status.text = "ANALIZA AKTYWNA | SKAN: $scanCount"
-
-            } catch (e: Exception) {
-
-                scanStatus.text = "BŁĄD ANALIZY: ${e.message}"
-
-            } finally {
-
-                scanInProgress = false
-
-                if (running) {
-                    handler.removeCallbacks(scanRunnable)
-                    handler.postDelayed(scanRunnable, 20000)
+                    )
                 }
             }
         }
+
+        return buildBasicReport(
+            width,
+            height,
+            detections
+        )
+    }
+        private fun classifyColor(pixel: Int): Int {
+        val hsv = FloatArray(3)
+        Color.colorToHSV(pixel, hsv)
+
+        val hue = hsv[0]
+        val saturation = hsv[1]
+        val value = hsv[2]
+
+        if (value < 0.20f) return 0
+
+        // Szary – niskie nasycenie.
+        if (saturation < 0.20f && value > 0.30f) {
+            return 3
+        }
+
+        if (saturation < 0.25f) return 0
+
+        // Niebieski.
+        if (hue in 185f..245f && saturation > 0.25f) {
+            return 1
+        }
+
+        // Fioletowy.
+        if (hue in 246f..305f && saturation > 0.25f) {
+            return 2
+        }
+
+        // Zielony.
+        if (hue in 65f..175f && saturation > 0.25f) {
+            return 4
+        }
+
+        // Czerwony.
+        if (
+            (hue <= 15f || hue >= 345f) &&
+            saturation > 0.25f
+        ) {
+            return 5
+        }
+
+        return 0
+    }
+
+    private fun colorName(id: Int): String {
+        return when (id) {
+            1 -> "NIEBIESKI"
+            2 -> "FIOLETOWY"
+            3 -> "SZARY"
+            4 -> "ZIELONY"
+            5 -> "CZERWONY"
+            else -> "NIEZNANY"
+        }
+    }
+
+    private fun buildBasicReport(
+        width: Int,
+        height: Int,
+        detections: List<Detection>
+    ): String {
+
+        val output = StringBuilder()
+
+        output.append("TRYB: RYBY PODSTAWOWE\n")
+        output.append("ANALIZA OBRAZU ŁOWISKA\n")
+        output.append("Rozmiar: ${width}x${height}\n")
+        output.append("Wykryte obszary: ${detections.size}\n\n")
+
+        if (detections.isEmpty()) {
+            output.append(
+                "Nie wykryto jeszcze kolorowych obszarów.\n"
+            )
+            output.append(
+                "Sprawdź, czy łowisko jest widoczne w WebView.\n"
+            )
+        } else {
+            for (i in detections.indices) {
+                val item = detections[i]
+
+                output.append(
+                    "${i + 1}. ${item.colorName}\n"
+                )
+
+                output.append(
+                    "   Pozycja: X=${item.x}, Y=${item.y}\n"
+                )
+
+                output.append(
+                    "   Rozmiar obszaru: " +
+                    "${item.width}x${item.height}\n"
+                )
+
+                output.append(
+                    "   Punkty obrazu: ${item.pixels}\n\n"
+                )
+            }
+        }
+
+        output.append(
+            "UWAGA: wykryte obszary nie są jeszcze potwierdzonymi kółkami."
+        )
+
+        output.append("\nKolejny skan za 20 sekund.")
+
+        return output.toString()
+    }
+
+    private fun analyzeMystras(bitmap: Bitmap): String {
+        val output = StringBuilder()
+
+        output.append("TRYB: RYBY MYSTRAS\n")
+        output.append("Osobna analiza dla Mystras.\n\n")
+
+        output.append("Cele wędkarskie:\n")
+        output.append("1. Golden Shams\n")
+        output.append("2. Mystras Serpentfish\n")
+        output.append("3. Akduff the Multiped\n\n")
+
+        output.append(
+            "Obraz łowiska: ${bitmap.width}x${bitmap.height}\n"
+        )
+
+        output.append(
+            "Rozpoznawanie ikon Mystras wymaga dopasowania " +
+            "obrazów ryb z biblioteki gry.\n"
+        )
+
+        output.append(
+            "Nie zastosowano tutaj pięciu kolorów z trybu podstawowego.\n"
+        )
+
+        output.append("\nKolejny skan za 20 sekund.")
+
+        return output.toString()
     }
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-
         val popup = popupWebView
 
         if (popup != null) {
-
             webContainer.removeView(popup)
             popup.destroy()
             popupWebView = null
-
             return
         }
 
@@ -647,7 +621,6 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-
         running = false
         handler.removeCallbacks(scanRunnable)
 
@@ -658,4 +631,4 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-}     
+}
