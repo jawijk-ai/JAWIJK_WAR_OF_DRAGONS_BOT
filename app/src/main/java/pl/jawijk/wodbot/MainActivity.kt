@@ -39,6 +39,7 @@ class MainActivity : Activity() {
     private var popupWebView: WebView? = null
 
     private var running = false
+    private var scanGeneration = 0L
     private var scanInProgress = false
     private var scanCount = 0
 
@@ -471,8 +472,8 @@ class MainActivity : Activity() {
             return
         }
 
+        scanGeneration++
         running = true
-        scanInProgress = false
 
         status.text = "Status: analizator działa"
         status.setTextColor(Color.GREEN)
@@ -484,6 +485,7 @@ class MainActivity : Activity() {
     }
 
     private fun stopScanning() {
+        scanGeneration++
         running = false
         handler.removeCallbacks(scanRunnable)
 
@@ -529,6 +531,10 @@ class MainActivity : Activity() {
 
         val target = selectedTarget()
         val mystras = isMystrasMode()
+        val generation = scanGeneration
+        val scannedUrl = active.url
+        val scannedScrollX = active.scrollX
+        val scannedScrollY = active.scrollY
 
         Thread {
             val result = try {
@@ -551,10 +557,37 @@ class MainActivity : Activity() {
             runOnUiThread {
                 scanInProgress = false
 
-                if (mystras) {
-                    showResult(result, "Mystras")
-                } else {
-                    showResult(result, "Ryby podstawowe")
+                val valid = running && generation == scanGeneration &&
+                    active === (popupWebView ?: webView) &&
+                    active.width == result.imageWidth &&
+                    active.height == result.imageHeight &&
+                    active.url == scannedUrl &&
+                    active.scrollX == scannedScrollX &&
+                    active.scrollY == scannedScrollY &&
+                    selectedTarget() == target && isMystrasMode() == mystras &&
+                    !isFinishing && !isDestroyed
+
+                if (valid) {
+                    showResult(result, if (mystras) "Mystras" else "Ryby podstawowe")
+                    val point = result.detections.firstOrNull()
+                    if (point != null && point.x in 0 until active.width &&
+                        point.y in 0 until active.height) {
+                        val now = android.os.SystemClock.uptimeMillis()
+                        val down = android.view.MotionEvent.obtain(now, now,
+                            android.view.MotionEvent.ACTION_DOWN,
+                            point.x.toFloat(), point.y.toFloat(), 0)
+                        val up = android.view.MotionEvent.obtain(now, now,
+                            android.view.MotionEvent.ACTION_UP,
+                            point.x.toFloat(), point.y.toFloat(), 0)
+                        try {
+                            active.dispatchTouchEvent(down)
+                            active.dispatchTouchEvent(up)
+                            addLog("Wysłano dotyk: X=" + point.x + ", Y=" + point.y)
+                        } finally {
+                            down.recycle()
+                            up.recycle()
+                        }
+                    }
                 }
             }
         }.start()
