@@ -4,7 +4,10 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -13,6 +16,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.random.Random
 
 class MainActivity : Activity() {
@@ -54,7 +60,7 @@ class MainActivity : Activity() {
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (running) {
-                scanAndClickJS()
+                scanAndClickCanvas()
                 
                 // Randomizacja częstotliwości (-20% do +20%)
                 val baseInterval = selectedInterval() * 1000L
@@ -81,7 +87,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT (JS Engine)"
+            text = "JAWIJK WOD BOT (Canvas Engine)"
             textSize = 20f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -222,7 +228,7 @@ class MainActivity : Activity() {
     private fun startScanning() {
         if (running) return
         running = true
-        status.text = "Status: bot działa (JS Engine)"
+        status.text = "Status: bot działa (Canvas Engine)"
         status.setTextColor(Color.GREEN)
         addLog("Uruchomiono bota.")
         handler.removeCallbacks(scanRunnable)
@@ -238,66 +244,75 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    private fun scanAndClickJS() {
+    private fun scanAndClickCanvas() {
         val active = popupWebView ?: webView
+        if (active.width <= 0 || active.height <= 0) return
+
         scanCount++
-        scanStatus.text = "Skanowanie nr $scanCount (JS)..."
+        scanStatus.text = "Skanowanie nr $scanCount (Canvas)..."
+        val target = selectedTarget()
 
-        val targetName = selectedTarget()
+        val bitmap = try {
+            Bitmap.createBitmap(active.width, active.height, Bitmap.Config.ARGB_8888).also {
+                active.draw(Canvas(it))
+            }
+        } catch (e: Exception) {
+            scanStatus.text = "Błąd zrzutu: ${e.message}"
+            return
+        }
 
-        val jsScript = """
-            (function() {
-                var elements = document.querySelectorAll('a, img, div[onclick], svg, canvas');
-                var found = [];
-                for (var i = 0; i < elements.length; i++) {
-                    var el = elements[i];
-                    var title = el.getAttribute('title') || el.getAttribute('alt') || el.className || el.id || '';
-                    if (title.toLowerCase().indexOf('$targetName'.toLowerCase()) !== -1 || el.outerHTML.indexOf('$targetName') !== -1) {
-                        var rect = el.getBoundingClientRect();
-                        if (rect.width > 0 && rect.height > 0) {
-                            found.push({
-                                x: rect.left + rect.width / 2,
-                                y: rect.top + rect.height / 2
-                            });
-                        }
-                    }
+        // Skanujemy wyłącznie obszar wody (pomijamy górne menu i dolny czat: Y od 25% do 65% wysokości)
+        val startX = (bitmap.width * 0.1f).toInt()
+        val endX = (bitmap.width * 0.9f).toInt()
+        val startY = (bitmap.height * 0.25f).toInt()
+        val endY = (bitmap.height * 0.65f).toInt()
+
+        var foundX = -1
+        var foundY = -1
+
+        // Skanujemy z krokiem co 6 pikseli dla wydajności
+        outer@ for (y in startY..endY step 6) {
+            for (x in startX..endX step 6) {
+                val pixel = bitmap.getPixel(x, y)
+                val r = Color.red(pixel)
+                val g = Color.green(pixel)
+                val b = Color.blue(pixel)
+
+                // Definicja warunków kolorystycznych dla konkretnego surowca
+                val isMatch = when (target) {
+                    "Niebieski" -> b > 140 && b > r + 30 && g > 100 // Jasny, żywy niebieski fali
+                    "Zielony" -> g > 140 && g > r + 20             // Jasna zieleń
+                    "Fioletowy" -> r > 120 && b > 120 && g < 100   // Fiolet / purpura
+                    "Czerwony" -> r > 160 && g < 80 && b < 80      // Jaskrawa czerwień
+                    else -> (r + g + b) / 3 > 200                  // Szary / Biały błysk
                 }
-                return JSON.stringify(found);
-            })();
-        """.trimIndent()
 
-        active.evaluateJavascript(jsScript) { jsonResult ->
-            if (jsonResult == null || jsonResult == "null" || jsonResult == "[]") {
-                scanStatus.text = "JS: Nie znaleziono obiektu '$targetName'."
-                addLog("Skan $scanCount | Nie odnaleziono surowca w strukturze strony.")
-            } else {
-                try {
-                    val cleanJson = if (jsonResult.startsWith("\"")) {
-                        jsonResult.substring(1, jsonResult.length - 1).replace("\\\"", "\"")
-                    } else jsonResult
-
-                    val array = org.json.JSONArray(cleanJson)
-                    if (array.length() > 0) {
-                        val obj = array.getJSONObject(0)
-                        val baseX = obj.getDouble("x").toFloat()
-                        val baseY = obj.getDouble("y").toFloat()
-
-                        // Randomizacja pozycji kliknięcia (-6px do +6px)
-                        val offsetX = Random.nextInt(-6, 7)
-                        val offsetY = Random.nextInt(-6, 7)
-
-                        val finalX = baseX + offsetX + active.scrollX
-                        val finalY = baseY + offsetY + active.scrollY
-
-                        performHumanClick(active, finalX, finalY)
-
-                        scanStatus.text = "JS: Znaleziono surowiec! Kliknięcie: ($finalX, $finalY)"
-                        addLog("Skan $scanCount | Trafienie! Klik w ($finalX, $finalY) [offset: X=$offsetX, Y=$offsetY]")
-                    }
-                } catch (e: Exception) {
-                    addLog("Błąd parsowania JS: ${e.message}")
+                if (isMatch) {
+                    foundX = x
+                    foundY = y
+                    break@outer
                 }
             }
+        }
+
+        bitmap.recycle()
+
+        if (foundX != -1 && foundY != -1) {
+            // NATURALNA RANDOMIZACJA KLIKNIĘCIA:
+            // Dodajemy losowe przesunięcie od -8px do +8px, żeby nie klikać idealnie w ten sam punkt
+            val offsetX = Random.nextInt(-8, 9)
+            val offsetY = Random.nextInt(-8, 9)
+
+            val finalX = (foundX + offsetX + active.scrollX).toFloat()
+            val finalY = (foundY + offsetY + active.scrollY).toFloat()
+
+            performHumanClick(active, finalX, finalY)
+
+            scanStatus.text = "Znaleziono $target! Klik: ($finalX, $finalY)"
+            addLog("Skan $scanCount | Trafienie ($target) w pikselu ($foundX, $foundY). Klik w ($finalX, $finalY)")
+        } else {
+            scanStatus.text = "Nie znaleziono $target na wodze."
+            addLog("Skan $scanCount | Brak surowca $target w obszarze wody.")
         }
     }
 
@@ -308,8 +323,8 @@ class MainActivity : Activity() {
         view.dispatchTouchEvent(down)
         down.recycle()
 
-        // Losowy czas przytrzymania palca (60ms - 130ms)
-        val holdDuration = Random.nextLong(60, 130)
+        // Losowy czas przytrzymania palca na ekranie (70ms - 150ms)
+        val holdDuration = Random.nextLong(70, 150)
         handler.postDelayed({
             val upTime = android.os.SystemClock.uptimeMillis()
             val up = android.view.MotionEvent.obtain(now, upTime, android.view.MotionEvent.ACTION_UP, x, y, 0)
