@@ -13,7 +13,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import org.json.JSONObject
 import kotlin.random.Random
 
 class MainActivity : Activity() {
@@ -57,8 +56,7 @@ class MainActivity : Activity() {
             if (running) {
                 scanAndClickJS()
                 
-                // RANDOMIZACJA CZĘSTOTLIWOŚCI:
-                // Dodajemy losowy czas od -20% do +20% podstawowego interwału
+                // Randomizacja częstotliwości (-20% do +20%)
                 val baseInterval = selectedInterval() * 1000L
                 val randomJitter = Random.nextLong(-baseInterval / 5, baseInterval / 5)
                 val nextDelay = (baseInterval + randomJitter).coerceAtLeast(3000L)
@@ -247,7 +245,6 @@ class MainActivity : Activity() {
 
         val targetName = selectedTarget()
 
-        // Skrypt JavaScript, który przeszukuje drzewo DOM gry w poszukiwaniu elementów interaktywnych (surowców/kółeczek)
         val jsScript = """
             (function() {
                 var elements = document.querySelectorAll('a, img, div[onclick], svg, canvas');
@@ -285,8 +282,7 @@ class MainActivity : Activity() {
                         val baseX = obj.getDouble("x").toFloat()
                         val baseY = obj.getDouble("y").toFloat()
 
-                        // RANDOMIZACJA KLIKNIĘCIA:
-                        // Dodajemy losowe przesunięcie w promieniu od -6px do +6px
+                        // Randomizacja pozycji kliknięcia (-6px do +6px)
                         val offsetX = Random.nextInt(-6, 7)
                         val offsetY = Random.nextInt(-6, 7)
 
@@ -312,7 +308,7 @@ class MainActivity : Activity() {
         view.dispatchTouchEvent(down)
         down.recycle()
 
-        // RANDOMIZACJA PRZYTRZYMANIA PALCA NA EKRANIE (60ms - 130ms)
+        // Losowy czas przytrzymania palca (60ms - 130ms)
         val holdDuration = Random.nextLong(60, 130)
         handler.postDelayed({
             val upTime = android.os.SystemClock.uptimeMillis()
@@ -320,6 +316,28 @@ class MainActivity : Activity() {
             view.dispatchTouchEvent(up)
             up.recycle()
         }, holdDuration)
+    }
+
+    private fun addLog(message: String) {
+        if (!::logText.isInitialized) return
+        runOnUiThread {
+            val time = java.text.SimpleDateFormat(
+                "HH:mm:ss",
+                java.util.Locale.getDefault()
+            ).format(java.util.Date())
+            logText.append("[$time] $message\n")
+
+            if (logText.lineCount > 300) {
+                val all = logText.text.toString()
+                logText.text = all.takeLast(12000)
+            }
+
+            if (::logScroll.isInitialized) {
+                logScroll.post {
+                    logScroll.fullScroll(View.FOCUS_DOWN)
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
