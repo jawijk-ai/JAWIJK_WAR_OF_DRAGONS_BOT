@@ -4,11 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -17,15 +13,13 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
+import org.json.JSONObject
+import kotlin.random.Random
 
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
     private lateinit var webContainer: FrameLayout
-    private lateinit var markerView: MarkerView
 
     private lateinit var status: TextView
     private lateinit var scanStatus: TextView
@@ -38,8 +32,6 @@ class MainActivity : Activity() {
     private var popupWebView: WebView? = null
 
     private var running = false
-    private var scanGeneration = 0L
-    private var scanInProgress = false
     private var scanCount = 0
 
     private val handler = Handler(Looper.getMainLooper())
@@ -58,58 +50,28 @@ class MainActivity : Activity() {
         "Mystras Serpentfish"
     )
 
-    private val intervalValues = listOf(
-        10, 20, 30, 45, 60, 90, 120
-    )
-
-    private val mystrasTemplates = mutableMapOf<String, Bitmap>()
-
-    private val referenceWidth = 1080f
-    private val referenceHeight = 1034f
-
-    // Ograniczamy obszar poszukiwań, aby Y nie wchodziło w strefę czatu (ponżej 700)
-    private val searchX1 = 50f
-    private val searchY1 = 100f
-    private val searchX2 = 1030f
-    private val searchY2 = 680f 
-
-    private data class Detection(
-        val x: Int,
-        val y: Int,
-        val radius: Int,
-        val name: String,
-        val score: Float = 0f
-    )
-
-    private data class AnalysisResult(
-        val detections: List<Detection>,
-        val message: String,
-        val imageWidth: Int,
-        val imageHeight: Int
-    )
+    private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
 
     private val scanRunnable = object : Runnable {
         override fun run() {
-            if (running && !scanInProgress) {
-                scanPage()
-            }
-
             if (running) {
-                handler.postDelayed(
-                    this,
-                    selectedInterval() * 1000L
-                )
+                scanAndClickJS()
+                
+                // RANDOMIZACJA CZĘSTOTLIWOŚCI:
+                // Dodajemy losowy czas od -20% do +20% podstawowego interwału
+                val baseInterval = selectedInterval() * 1000L
+                val randomJitter = Random.nextLong(-baseInterval / 5, baseInterval / 5)
+                val nextDelay = (baseInterval + randomJitter).coerceAtLeast(3000L)
+
+                handler.postDelayed(this, nextDelay)
             }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         buildInterface()
         configureWebView()
-        loadMystrasTemplates()
-
         webView.loadUrl("https://warofdragons.com/")
     }
 
@@ -121,7 +83,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT"
+            text = "JAWIJK WOD BOT (JS Engine)"
             textSize = 20f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -130,47 +92,24 @@ class MainActivity : Activity() {
         root.addView(title)
 
         categorySpinner = Spinner(this)
-        categorySpinner.adapter = makeAdapter(
-            listOf("Ryby podstawowe", "Ryby Mystras")
-        )
+        categorySpinner.adapter = makeAdapter(listOf("Ryby podstawowe", "Ryby Mystras"))
         root.addView(categorySpinner)
 
         targetSpinner = Spinner(this)
         targetSpinner.adapter = makeAdapter(basicTargets)
         root.addView(targetSpinner)
 
-        categorySpinner.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-
-                override fun onNothingSelected(
-                    parent: AdapterView<*>?
-                ) {}
-
-                override fun onItemSelected(
-                    parent: AdapterView<*>?,
-                    view: View?,
-                    position: Int,
-                    id: Long
-                ) {
-                    val targets =
-                        if (position == 1) {
-                            mystrasTargets
-                        } else {
-                            basicTargets
-                        }
-
-                    targetSpinner.adapter = makeAdapter(targets)
-                    markerView.clear()
-
-                    scanStatus.text =
-                        "Wybierz surowiec i uruchom analizę."
-                }
+        categorySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val targets = if (position == 1) mystrasTargets else basicTargets
+                targetSpinner.adapter = makeAdapter(targets)
+                scanStatus.text = "Wybierz surowiec i uruchom bota."
             }
+        }
 
         intervalSpinner = Spinner(this)
-        intervalSpinner.adapter = makeAdapter(
-            intervalValues.map { "$it sekund" }
-        )
+        intervalSpinner.adapter = makeAdapter(intervalValues.map { "$it sekund" })
         intervalSpinner.setSelection(1)
         root.addView(intervalSpinner)
 
@@ -181,36 +120,16 @@ class MainActivity : Activity() {
 
         val startButton = Button(this).apply {
             text = "START"
-            setOnClickListener {
-                startScanning()
-            }
+            setOnClickListener { startScanning() }
         }
 
         val stopButton = Button(this).apply {
             text = "STOP"
-            setOnClickListener {
-                stopScanning()
-            }
+            setOnClickListener { stopScanning() }
         }
 
-        buttons.addView(
-            startButton,
-            LinearLayout.LayoutParams(
-                0,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-        )
-
-        buttons.addView(
-            stopButton,
-            LinearLayout.LayoutParams(
-                0,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-        )
-
+        buttons.addView(startButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        buttons.addView(stopButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons)
 
         status = TextView(this).apply {
@@ -222,118 +141,41 @@ class MainActivity : Activity() {
         root.addView(status)
 
         scanStatus = TextView(this).apply {
-            text = "Analiza jeszcze nieuruchomiona."
+            text = "Bot nieaktywny."
             textSize = 13f
             setTextColor(Color.WHITE)
             setPadding(4, 4, 4, 8)
         }
         root.addView(scanStatus)
 
-        val zoomRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-
-        val zoomOut = Button(this).apply {
-            text = "−"
-            setOnClickListener {
-                webView.zoomOut()
-            }
-        }
-
-        val zoomIn = Button(this).apply {
-            text = "+"
-            setOnClickListener {
-                webView.zoomIn()
-            }
-        }
-
-        zoomRow.addView(zoomOut)
-        zoomRow.addView(zoomIn)
-        root.addView(zoomRow)
-
         webContainer = FrameLayout(this)
-
         webView = WebView(this)
+        webContainer.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        webContainer.addView(
-            webView,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
+        root.addView(webContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        markerView = MarkerView(this).apply {
-            isClickable = false
-            isFocusable = false
-        }
-
-        webContainer.addView(
-            markerView,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        root.addView(
-            webContainer,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
-        )
-
-        val logButton = Button(this).apply {
-            text = "POKAŻ / UKRYJ LOG"
-        }
-
+        val logButton = Button(this).apply { text = "POKAŻ / UKRYJ LOG" }
         logText = TextView(this).apply {
             textSize = 11f
             setTextColor(Color.LTGRAY)
             setPadding(6, 6, 6, 6)
         }
-
         logScroll = ScrollView(this).apply {
             visibility = View.GONE
             addView(logText)
         }
-
         logButton.setOnClickListener {
-            logScroll.visibility =
-                if (logScroll.visibility == View.VISIBLE) {
-                    View.GONE
-                } else {
-                    View.VISIBLE
-                }
+            logScroll.visibility = if (logScroll.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-
         root.addView(logButton)
-
-        root.addView(
-            logScroll,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                110
-            )
-        )
+        root.addView(logScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 120))
 
         setContentView(root)
     }
 
-    private fun makeAdapter(
-        items: List<String>
-    ): ArrayAdapter<String> {
-        return ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            items
-        ).also {
-            it.setDropDownViewResource(
-                android.R.layout.simple_spinner_dropdown_item
-            )
+    private fun makeAdapter(items: List<String>): ArrayAdapter<String> {
+        return ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
+            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
     }
 
@@ -347,35 +189,16 @@ class MainActivity : Activity() {
             javaScriptCanOpenWindowsAutomatically = true
             useWideViewPort = true
             loadWithOverviewMode = true
-            builtInZoomControls = true
-            displayZoomControls = false
-            setSupportZoom(true)
         }
 
         CookieManager.getInstance().setAcceptCookie(true)
-
-        CookieManager.getInstance()
-            .setAcceptThirdPartyCookies(webView, true)
-
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = WebViewClient()
-
         webView.webChromeClient = object : WebChromeClient() {
-
-            override fun onCreateWindow(
-                view: WebView?,
-                isDialog: Boolean,
-                isUserGesture: Boolean,
-                resultMsg: android.os.Message?
-            ): Boolean {
-
+            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
                 val popup = WebView(this@MainActivity)
-
                 popup.settings.javaScriptEnabled = true
                 popup.settings.domStorageEnabled = true
-                popup.settings.databaseEnabled = true
-                popup.settings.loadsImagesAutomatically = true
-                popup.settings.setSupportMultipleWindows(true)
-
                 popup.webViewClient = WebViewClient()
                 popup.webChromeClient = this
 
@@ -385,441 +208,123 @@ class MainActivity : Activity() {
                 }
 
                 popupWebView = popup
-
-                webContainer.addView(
-                    popup,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                )
-
-                val transport =
-                    resultMsg?.obj as? WebView.WebViewTransport
-                        ?: return false
-
+                webContainer.addView(popup, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
                 transport.webView = popup
                 resultMsg.sendToTarget()
-
-                addLog("Otwarto dodatkowe okno gry.")
+                addLog("Otwarto okno gry (Popup).")
                 return true
             }
         }
     }
 
-    private fun selectedInterval(): Int {
-        return intervalValues.getOrElse(
-            intervalSpinner.selectedItemPosition
-        ) {
-            20
-        }
-    }
-
-    private fun selectedTarget(): String {
-        return targetSpinner.selectedItem?.toString() ?: ""
-    }
-
-    private fun isMystrasMode(): Boolean {
-        return categorySpinner.selectedItemPosition == 1
-    }
-
-    private fun loadMystrasTemplates() {
-        val files = mapOf(
-            "Golden Shams" to "golden_shams.png",
-            "Coastal Shamsu" to "coastal_shamsu.png",
-            "Mystras Serpentfish" to "mystras_serpentfish.png"
-        )
-
-        for ((name, file) in files) {
-            try {
-                assets.open(file).use { input ->
-                    val bitmap = BitmapFactory.decodeStream(input)
-
-                    if (bitmap != null) {
-                        mystrasTemplates[name] = bitmap
-                        addLog("Wczytano wzorzec: $name")
-                    } else {
-                        addLog("BŁĄD: nie można odczytać $file")
-                    }
-                }
-            } catch (e: Exception) {
-                addLog("BRAK PLIKU $file: ${e.message}")
-            }
-        }
-    }
+    private fun selectedInterval() = intervalValues.getOrElse(intervalSpinner.selectedItemPosition) { 20 }
+    private fun selectedTarget() = targetSpinner.selectedItem?.toString() ?: ""
 
     private fun startScanning() {
         if (running) return
-
-        scanGeneration++
         running = true
-
-        status.text = "Status: analizator działa"
+        status.text = "Status: bot działa (JS Engine)"
         status.setTextColor(Color.GREEN)
-
-        addLog("Uruchomiono analizator.")
-
+        addLog("Uruchomiono bota.")
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
     }
 
     private fun stopScanning() {
-        scanGeneration++
         running = false
         handler.removeCallbacks(scanRunnable)
-
         status.text = "Status: zatrzymany"
         status.setTextColor(Color.RED)
-
-        scanStatus.text = "Analiza zatrzymana."
-        addLog("Zatrzymano analizator.")
+        scanStatus.text = "Bot zatrzymany."
+        addLog("Zatrzymano bota.")
     }
 
-    private fun scanPage() {
-        if (scanInProgress) return
-
+    private fun scanAndClickJS() {
         val active = popupWebView ?: webView
-
-        if (active.width <= 0 || active.height <= 0) {
-            scanStatus.text = "Brak widocznego obrazu gry."
-            return
-        }
-
-        scanInProgress = true
         scanCount++
+        scanStatus.text = "Skanowanie nr $scanCount (JS)..."
 
-        scanStatus.text = "Skanowanie nr $scanCount..."
+        val targetName = selectedTarget()
 
-        val bitmap = try {
-            Bitmap.createBitmap(
-                active.width,
-                active.height,
-                Bitmap.Config.ARGB_8888
-            ).also {
-                active.draw(Canvas(it))
-            }
-        } catch (e: Exception) {
-            scanInProgress = false
-            scanStatus.text = "Błąd zrzutu ekranu: ${e.message}"
-            return
-        }
-
-        val target = selectedTarget()
-        val mystras = isMystrasMode()
-        val generation = scanGeneration
-        val scannedUrl = active.url
-        val scannedScrollX = active.scrollX
-        val scannedScrollY = active.scrollY
-
-        Thread {
-            val result = try {
-                if (mystras) {
-                    analyzeMystras(bitmap, target)
-                } else {
-                    analyzeRingTemplate(bitmap, target)
-                }
-            } catch (e: Exception) {
-                AnalysisResult(
-                    emptyList(),
-                    "Błąd analizy: ${e.message}",
-                    bitmap.width,
-                    bitmap.height
-                )
-            } finally {
-                bitmap.recycle()
-            }
-
-            runOnUiThread {
-                scanInProgress = false
-
-                val valid = running && generation == scanGeneration &&
-                    active === (popupWebView ?: webView) &&
-                    active.width == result.imageWidth &&
-                    active.height == result.imageHeight &&
-                    active.url == scannedUrl &&
-                    active.scrollX == scannedScrollX &&
-                    active.scrollY == scannedScrollY &&
-                    selectedTarget() == target && isMystrasMode() == mystras &&
-                    !isFinishing && !isDestroyed
-
-                if (valid) {
-                    showResult(result, if (mystras) "Mystras" else "Szablon pierścienia")
-                    val point = result.detections.firstOrNull()
-                    
-                    // Bezpieczeństwo: klikamy tylko wtedy, gdy Y jest wyraźnie powyżej czatu (< 70% wysokości widoku)
-                    val maxAllowedY = (active.height * 0.70).toInt()
-                    
-                    if (point != null && point.x in 0 until active.width &&
-                        point.y in 0 until maxAllowedY) {
-                        
-                        val targetX = point.x + active.scrollX
-                        val targetY = point.y + active.scrollY
-
-                        val now = android.os.SystemClock.uptimeMillis()
-                        val down = android.view.MotionEvent.obtain(now, now,
-                            android.view.MotionEvent.ACTION_DOWN,
-                            targetX.toFloat(), targetY.toFloat(), 0)
-                        val up = android.view.MotionEvent.obtain(now, now,
-                            android.view.MotionEvent.ACTION_UP,
-                            targetX.toFloat(), targetY.toFloat(), 0)
-                        try {
-                            active.dispatchTouchEvent(down)
-                            active.dispatchTouchEvent(up)
-                            addLog("Wysłano dotyk w wodę: X=$targetX, Y=$targetY")
-                        } finally {
-                            down.recycle()
-                            up.recycle()
-                        }
-                    } else if (point != null) {
-                        addLog("Odrzucono kliknięcie w strefie czatu: Y=${point.y}")
-                    }
-                }
-            }
-        }.start()
-    }
-
-    private fun analyzeMystras(
-        bitmap: Bitmap,
-        target: String
-    ): AnalysisResult {
-        val template = mystrasTemplates[target]
-            ?: return AnalysisResult(emptyList(), "Brak wzorca Mystras", bitmap.width, bitmap.height)
-        // Podniesiony próg dla Mystras do 0.72f, żeby unikać fałszywych trafień
-        return runTemplateMatching(bitmap, template, target, 0.72f)
-    }
-
-    private fun analyzeRingTemplate(
-        bitmap: Bitmap,
-        target: String
-    ): AnalysisResult {
-        val template = generateRingBitmap(target)
-        // Podniesiony próg do 0.75f, aby ignorować szum interfejsu
-        return runTemplateMatching(bitmap, template, target, 0.75f)
-    }
-
-    private fun generateRingBitmap(target: String): Bitmap {
-        val size = 44
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        canvas.drawColor(Color.TRANSPARENT)
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 3f
-            color = when (target) {
-                "Niebieski" -> Color.rgb(100, 180, 255)
-                "Zielony" -> Color.rgb(0, 255, 100)
-                "Fioletowy" -> Color.rgb(200, 100, 255)
-                "Czerwony" -> Color.rgb(255, 50, 50)
-                else -> Color.WHITE
-            }
-        }
-
-        canvas.drawCircle(size / 2f, size / 2f, 13f, paint)
-        canvas.drawCircle(size / 2f, size / 2f, 20f, paint)
-
-        return bmp
-    }
-
-    private fun runTemplateMatching(
-        bitmap: Bitmap,
-        template: Bitmap,
-        target: String,
-        threshold: Float
-    ): AnalysisResult {
-        val sx = bitmap.width / referenceWidth
-        val sy = bitmap.height / referenceHeight
-
-        val left = (searchX1 * sx).toInt().coerceIn(0, bitmap.width - 1)
-        val top = (searchY1 * sy).toInt().coerceIn(0, bitmap.height - 1)
-        val right = (searchX2 * sx).toInt().coerceIn(left + 1, bitmap.width)
-        val bottom = (searchY2 * sy).toInt().coerceIn(top + 1, bitmap.height)
-
-        val detections = mutableListOf<Detection>()
-        val tw = template.width
-        val th = template.height
-
-        var y = top
-        while (y <= bottom - th) {
-            var x = left
-            while (x <= right - tw) {
-                var matched = 0
-                var checked = 0
-
-                for (ty in 0 until th step 4) {
-                    for (tx in 0 until tw step 4) {
-                        val tColor = template.getPixel(tx, ty)
-                        if (Color.alpha(tColor) > 50) {
-                            val px = x + tx
-                            val py = y + ty
-                            if (px in 0 until bitmap.width && py in 0 until bitmap.height) {
-                                val screenColor = bitmap.getPixel(px, py)
-                                val dr = abs(Color.red(screenColor) - Color.red(tColor))
-                                val dg = abs(Color.green(screenColor) - Color.green(tColor))
-                                val db = abs(Color.blue(screenColor) - Color.blue(tColor))
-                                if (dr + dg + db < 140) {
-                                    matched++
-                                }
-                                checked++
-                            }
+        // Skrypt JavaScript, który przeszukuje drzewo DOM gry w poszukiwaniu elementów interaktywnych (surowców/kółeczek)
+        val jsScript = """
+            (function() {
+                var elements = document.querySelectorAll('a, img, div[onclick], svg, canvas');
+                var found = [];
+                for (var i = 0; i < elements.length; i++) {
+                    var el = elements[i];
+                    var title = el.getAttribute('title') || el.getAttribute('alt') || el.className || el.id || '';
+                    if (title.toLowerCase().indexOf('$targetName'.toLowerCase()) !== -1 || el.outerHTML.indexOf('$targetName') !== -1) {
+                        var rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            found.push({
+                                x: rect.left + rect.width / 2,
+                                y: rect.top + rect.height / 2
+                            });
                         }
                     }
                 }
+                return JSON.stringify(found);
+            })();
+        """.trimIndent()
 
-                val score = if (checked == 0) 0f else matched.toFloat() / checked.toFloat()
+        active.evaluateJavascript(jsScript) { jsonResult ->
+            if (jsonResult == null || jsonResult == "null" || jsonResult == "[]") {
+                scanStatus.text = "JS: Nie znaleziono obiektu '$targetName'."
+                addLog("Skan $scanCount | Nie odnaleziono surowca w strukturze strony.")
+            } else {
+                try {
+                    val cleanJson = if (jsonResult.startsWith("\"")) {
+                        jsonResult.substring(1, jsonResult.length - 1).replace("\\\"", "\"")
+                    } else jsonResult
 
-                if (score >= threshold) {
-                    val centerX = x + tw / 2
-                    val centerY = y + th / 2
+                    val array = org.json.JSONArray(cleanJson)
+                    if (array.length() > 0) {
+                        val obj = array.getJSONObject(0)
+                        val baseX = obj.getDouble("x").toFloat()
+                        val baseY = obj.getDouble("y").toFloat()
 
-                    val duplicate = detections.any {
-                        abs(it.x - centerX) < tw && abs(it.y - centerY) < th
+                        // RANDOMIZACJA KLIKNIĘCIA:
+                        // Dodajemy losowe przesunięcie w promieniu od -6px do +6px
+                        val offsetX = Random.nextInt(-6, 7)
+                        val offsetY = Random.nextInt(-6, 7)
+
+                        val finalX = baseX + offsetX + active.scrollX
+                        val finalY = baseY + offsetY + active.scrollY
+
+                        performHumanClick(active, finalX, finalY)
+
+                        scanStatus.text = "JS: Znaleziono surowiec! Kliknięcie: ($finalX, $finalY)"
+                        addLog("Skan $scanCount | Trafienie! Klik w ($finalX, $finalY) [offset: X=$offsetX, Y=$offsetY]")
                     }
-
-                    if (!duplicate) {
-                        detections.add(
-                            Detection(centerX, centerY, tw / 2, target, score)
-                        )
-                    }
-                }
-                x += 6
-            }
-            y += 6
-        }
-
-        val message = if (detections.isEmpty()) {
-            "Nie znaleziono $target."
-        } else {
-            "Znaleziono ${detections.size} x $target."
-        }
-
-        return AnalysisResult(detections, message, bitmap.width, bitmap.height)
-    }
-
-    private fun showResult(
-        result: AnalysisResult,
-        mode: String
-    ) {
-        markerView.setDetections(
-            result.detections,
-            result.imageWidth,
-            result.imageHeight
-        )
-
-        scanStatus.text = result.message
-        addLog("Skan $scanCount | $mode | ${result.message}")
-    }
-
-    private fun addLog(message: String) {
-        if (!::logText.isInitialized) return
-        runOnUiThread {
-            val time = java.text.SimpleDateFormat(
-                "HH:mm:ss",
-                java.util.Locale.getDefault()
-            ).format(java.util.Date())
-            logText.append("[$time] $message\n")
-            if (logText.lineCount > 300) {
-                val all = logText.text.toString()
-                logText.text = all.takeLast(12000)
-            }
-            if (::logScroll.isInitialized) {
-                logScroll.post {
-                    logScroll.fullScroll(View.FOCUS_DOWN)
+                } catch (e: Exception) {
+                    addLog("Błąd parsowania JS: ${e.message}")
                 }
             }
         }
     }
 
-    override fun onBackPressed() {
-        val popup = popupWebView
-        if (popup != null) {
-            webContainer.removeView(popup)
-            popup.stopLoading()
-            popup.destroy()
-            popupWebView = null
-            addLog("Zamknięto dodatkowe okno.")
-            return
-        }
-        if (webView.canGoBack()) {
-            webView.goBack()
-            return
-        }
-        super.onBackPressed()
+    private fun performHumanClick(view: View, x: Float, y: Float) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
+        
+        view.dispatchTouchEvent(down)
+        down.recycle()
+
+        // RANDOMIZACJA PRZYTRZYMANIA PALCA NA EKRANIE (60ms - 130ms)
+        val holdDuration = Random.nextLong(60, 130)
+        handler.postDelayed({
+            val upTime = android.os.SystemClock.uptimeMillis()
+            val up = android.view.MotionEvent.obtain(now, upTime, android.view.MotionEvent.ACTION_UP, x, y, 0)
+            view.dispatchTouchEvent(up)
+            up.recycle()
+        }, holdDuration)
     }
 
     override fun onDestroy() {
         running = false
         handler.removeCallbacksAndMessages(null)
-        popupWebView?.let {
-            webContainer.removeView(it)
-            it.stopLoading()
-            it.destroy()
-        }
-        popupWebView = null
-
-        if (::webView.isInitialized) {
-            webView.stopLoading()
-            webView.destroy()
-        }
-
-        mystrasTemplates.values.forEach {
-            if (!it.isRecycled) it.recycle()
-        }
-        mystrasTemplates.clear()
         super.onDestroy()
-    }
-
-    private inner class MarkerView(
-        context: android.content.Context
-    ) : View(context) {
-
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var detections: List<Detection> = emptyList()
-        private var sourceWidth = 1
-        private var sourceHeight = 1
-
-        fun setDetections(
-            newDetections: List<Detection>,
-            imageWidth: Int,
-            imageHeight: Int
-        ) {
-            detections = newDetections
-            sourceWidth = max(1, imageWidth)
-            sourceHeight = max(1, imageHeight)
-            invalidate()
-        }
-
-        fun clear() {
-            detections = emptyList()
-            invalidate()
-        }
-
-        override fun onDraw(canvas: Canvas) {
-            super.onDraw(canvas)
-            if (detections.isEmpty()) return
-
-            val scaleX = width.toFloat() / sourceWidth.toFloat()
-            val scaleY = height.toFloat() / sourceHeight.toFloat()
-
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 4f
-
-            for (d in detections) {
-                val cx = d.x * scaleX
-                val cy = d.y * scaleY
-                val r = d.radius * max(scaleX, scaleY)
-
-                paint.color = when (d.name) {
-                    "Czerwony" -> Color.RED
-                    "Niebieski" -> Color.BLUE
-                    "Zielony" -> Color.GREEN
-                    "Fioletowy" -> Color.MAGENTA
-                    "Szary" -> Color.GRAY
-                    else -> Color.YELLOW
-                }
-
-                canvas.drawCircle(cx, cy, max(15f, r), paint)
-            }
-        }
     }
 }
