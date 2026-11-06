@@ -422,9 +422,6 @@ class MainActivity : Activity() {
     private fun isMystrasMode(): Boolean {
         return categorySpinner.selectedItemPosition == 1
     }
-    // --------------------------------------------------
-    // WCZYTYWANIE ZDJĘĆ WZORCOWYCH
-    // --------------------------------------------------
 
     private fun loadMystrasTemplates() {
         val files = mapOf(
@@ -459,10 +456,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // --------------------------------------------------
-    // START / STOP
-    // --------------------------------------------------
-
     private fun startScanning() {
         if (running) return
 
@@ -495,10 +488,6 @@ class MainActivity : Activity() {
         scanStatus.text = "Analiza zatrzymana."
         addLog("Zatrzymano analizator.")
     }
-
-    // --------------------------------------------------
-    // ZRZUT AKTUALNIE WIDOCZNEGO WEBVIEW
-    // --------------------------------------------------
 
     private fun scanPage() {
         if (scanInProgress) return
@@ -592,10 +581,6 @@ class MainActivity : Activity() {
             }
         }.start()
     }
-
-    // --------------------------------------------------
-    // ANALIZATOR MYSTRAS - PORÓWNANIE ZE ZDJĘCIAMI
-    // --------------------------------------------------
 
     private fun analyzeMystras(
         bitmap: Bitmap,
@@ -728,8 +713,6 @@ class MainActivity : Activity() {
         val color: Int
     )
 
-    // Wybieranie kolorowych punktów ikony.
-    // Większość tła wody jest pomijana.
     private fun createTemplateMask(
         template: Bitmap
     ): List<TemplatePoint> {
@@ -775,7 +758,6 @@ class MainActivity : Activity() {
         return points
     }
 
-    // Porównywanie punktów wzorca z obrazem gry.
     private fun compareTemplate(
         bitmap: Bitmap,
         startX: Int,
@@ -826,8 +808,9 @@ class MainActivity : Activity() {
             matched.toFloat() / checked.toFloat()
         }
     }
-      // --------------------------------------------------
-    // ANALIZATOR RYB PODSTAWOWYCH
+
+    // --------------------------------------------------
+    // ANALIZATOR RYB PODSTAWOWYCH (POPRAWIONY)
     // --------------------------------------------------
 
     private fun analyzeBasic(
@@ -931,17 +914,27 @@ class MainActivity : Activity() {
                 val aspect =
                     width.toFloat() / height.toFloat()
 
-                if (count in 5..1800 &&
-                    aspect in 0.45f..2.2f
-                ) {
-                    detections.add(
-                        Detection(
-                            x = (sumX / count) * step,
-                            y = (sumY / count) * step,
-                            radius = max(width, height) * step / 2,
-                            name = target
+                // POPRAWKA TUTAJ: Ograniczenie rozmiaru (15..180) oraz rygorystyczne proporcje okręgu (0.8f..1.2f),
+                // co eliminuje wielkie plamy z połączonych kółek i śmiecie z tła.
+                if (count in 15..180 && aspect in 0.8f..1.2f) {
+                    val centerX = (sumX / count) * step
+                    val centerY = (sumY / count) * step
+
+                    // Zabezpieczenie przed nakładającymi się klastrami (odrzuca zbyt bliskie duplikaty)
+                    val tooClose = detections.any {
+                        abs(it.x - centerX) < 40 && abs(it.y - centerY) < 40
+                    }
+
+                    if (!tooClose) {
+                        detections.add(
+                            Detection(
+                                x = centerX,
+                                y = centerY,
+                                radius = max(width, height) * step / 2,
+                                name = target
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -961,8 +954,6 @@ class MainActivity : Activity() {
         )
     }
 
-    // Pięć kolorów wyłącznie dla ryb podstawowych.
-    // Mystras korzysta z osobnego analizatora zdjęć.
     private fun classifyBasicColor(
         color: Int
     ): String? {
@@ -1006,10 +997,6 @@ class MainActivity : Activity() {
         return null
     }
 
-    // --------------------------------------------------
-    // WYŚWIETLANIE WYNIKÓW
-    // --------------------------------------------------
-
     private fun showResult(
         result: AnalysisResult,
         mode: String
@@ -1044,10 +1031,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // --------------------------------------------------
-    // LOG
-    // --------------------------------------------------
-
     private fun addLog(message: String) {
 
         if (!::logText.isInitialized) return
@@ -1074,10 +1057,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // --------------------------------------------------
-    // POWRÓT / ZAMYKANIE POPUP
-    // --------------------------------------------------
-
     override fun onBackPressed() {
 
         val popup = popupWebView
@@ -1102,10 +1081,6 @@ class MainActivity : Activity() {
 
         super.onBackPressed()
     }
-
-    // --------------------------------------------------
-    // ZWALNIANIE ZASOBÓW
-    // --------------------------------------------------
 
     override fun onDestroy() {
 
@@ -1135,10 +1110,6 @@ class MainActivity : Activity() {
 
         super.onDestroy()
     }
-
-    // --------------------------------------------------
-    // CZERWONE OZNACZENIA WYKRYTYCH RYB
-    // --------------------------------------------------
 
     private inner class MarkerView(
         context: android.content.Context
@@ -1177,61 +1148,27 @@ class MainActivity : Activity() {
 
             if (detections.isEmpty()) return
 
-            val scaleX =
-                width.toFloat() / sourceWidth
+            val scaleX = width.toFloat() / sourceWidth.toFloat()
+            val scaleY = height.toFloat() / sourceHeight.toFloat()
 
-            val scaleY =
-                height.toFloat() / sourceHeight
-
-            paint.color = Color.RED
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 4f
 
-            for (detection in detections) {
+            for (d in detections) {
+                val cx = d.x * scaleX
+                val cy = d.y * scaleY
+                val r = d.radius * max(scaleX, scaleY)
 
-                val x = detection.x * scaleX
-                val y = detection.y * scaleY
+                paint.color = when (d.name) {
+                    "Czerwony" -> Color.RED
+                    "Niebieski" -> Color.BLUE
+                    "Zielony" -> Color.GREEN
+                    "Fioletowy" -> Color.MAGENTA
+                    "Szary" -> Color.GRAY
+                    else -> Color.YELLOW
+                }
 
-                val radius = max(
-                    12f,
-                    detection.radius *
-                        (scaleX + scaleY) / 2f
-                )
-
-                canvas.drawCircle(
-                    x,
-                    y,
-                    radius,
-                    paint
-                )
-
-                canvas.drawLine(
-                    x - 12f,
-                    y,
-                    x + 12f,
-                    y,
-                    paint
-                )
-
-                canvas.drawLine(
-                    x,
-                    y - 12f,
-                    x,
-                    y + 12f,
-                    paint
-                )
-
-                paint.style = Paint.Style.FILL
-                paint.textSize = 25f
-
-                canvas.drawText(
-                    detection.name,
-                    x + radius + 5f,
-                    y,
-                    paint
-                )
-
-                paint.style = Paint.Style.STROKE
+                canvas.drawCircle(cx, cy, max(15f, r), paint)
             }
         }
     }
