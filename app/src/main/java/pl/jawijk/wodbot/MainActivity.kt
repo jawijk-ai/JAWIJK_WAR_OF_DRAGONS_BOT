@@ -67,10 +67,11 @@ class MainActivity : Activity() {
     private val referenceWidth = 1080f
     private val referenceHeight = 1034f
 
-    private val searchX1 = 200f
-    private val searchY1 = 200f
-    private val searchX2 = 800f
-    private val searchY2 = 800f // Zwiększony zakres w dół, ponad czatem
+    // Ograniczamy obszar poszukiwań, aby Y nie wchodziło w strefę czatu (ponżej 700)
+    private val searchX1 = 50f
+    private val searchY1 = 100f
+    private val searchX2 = 1030f
+    private val searchY2 = 680f 
 
     private data class Detection(
         val x: Int,
@@ -544,8 +545,12 @@ class MainActivity : Activity() {
                 if (valid) {
                     showResult(result, if (mystras) "Mystras" else "Szablon pierścienia")
                     val point = result.detections.firstOrNull()
+                    
+                    // Bezpieczeństwo: klikamy tylko wtedy, gdy Y jest wyraźnie powyżej czatu (< 70% wysokości widoku)
+                    val maxAllowedY = (active.height * 0.70).toInt()
+                    
                     if (point != null && point.x in 0 until active.width &&
-                        point.y in 0 until active.height) {
+                        point.y in 0 until maxAllowedY) {
                         
                         val targetX = point.x + active.scrollX
                         val targetY = point.y + active.scrollY
@@ -560,11 +565,13 @@ class MainActivity : Activity() {
                         try {
                             active.dispatchTouchEvent(down)
                             active.dispatchTouchEvent(up)
-                            addLog("Wysłano dotyk: X=$targetX, Y=$targetY")
+                            addLog("Wysłano dotyk w wodę: X=$targetX, Y=$targetY")
                         } finally {
                             down.recycle()
                             up.recycle()
                         }
+                    } else if (point != null) {
+                        addLog("Odrzucono kliknięcie w strefie czatu: Y=${point.y}")
                     }
                 }
             }
@@ -577,25 +584,21 @@ class MainActivity : Activity() {
     ): AnalysisResult {
         val template = mystrasTemplates[target]
             ?: return AnalysisResult(emptyList(), "Brak wzorca Mystras", bitmap.width, bitmap.height)
-        return runTemplateMatching(bitmap, template, target, 0.65f)
+        // Podniesiony próg dla Mystras do 0.72f, żeby unikać fałszywych trafień
+        return runTemplateMatching(bitmap, template, target, 0.72f)
     }
-
-    // --------------------------------------------------
-    // NOWY ANALIZATOR OPARTY NA GENEROWANYm W LOCIE SZABLONIE PIERŚCIENIA
-    // --------------------------------------------------
 
     private fun analyzeRingTemplate(
         bitmap: Bitmap,
         target: String
     ): AnalysisResult {
-        // Generujemy w locie wzorzec pierścienia pasujący do kółeczek z Twojego zrzutu ekranu
         val template = generateRingBitmap(target)
-
-        return runTemplateMatching(bitmap, template, target, 0.55f)
+        // Podniesiony próg do 0.75f, aby ignorować szum interfejsu
+        return runTemplateMatching(bitmap, template, target, 0.75f)
     }
 
     private fun generateRingBitmap(target: String): Bitmap {
-        val size = 40 // Rozmiar szablonu kółka w pikselach
+        val size = 44
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.TRANSPARENT)
@@ -608,13 +611,12 @@ class MainActivity : Activity() {
                 "Zielony" -> Color.rgb(0, 255, 100)
                 "Fioletowy" -> Color.rgb(200, 100, 255)
                 "Czerwony" -> Color.rgb(255, 50, 50)
-                else -> Color.WHITE // Szary / Biały
+                else -> Color.WHITE
             }
         }
 
-        // Rysujemy dwa współżyjące kręgi symulujące pulsującą falę z obrazka
-        canvas.drawCircle(size / 2f, size / 2f, 12f, paint)
-        canvas.drawCircle(size / 2f, size / 2f, 18f, paint)
+        canvas.drawCircle(size / 2f, size / 2f, 13f, paint)
+        canvas.drawCircle(size / 2f, size / 2f, 20f, paint)
 
         return bmp
     }
@@ -644,7 +646,6 @@ class MainActivity : Activity() {
                 var matched = 0
                 var checked = 0
 
-                // Szybkie porównanie wybranych punktów szablonu z ekranem
                 for (ty in 0 until th step 4) {
                     for (tx in 0 until tw step 4) {
                         val tColor = template.getPixel(tx, ty)
@@ -653,11 +654,10 @@ class MainActivity : Activity() {
                             val py = y + ty
                             if (px in 0 until bitmap.width && py in 0 until bitmap.height) {
                                 val screenColor = bitmap.getPixel(px, py)
-                                // Porównanie odległości kolorów RGB
                                 val dr = abs(Color.red(screenColor) - Color.red(tColor))
                                 val dg = abs(Color.green(screenColor) - Color.green(tColor))
                                 val db = abs(Color.blue(screenColor) - Color.blue(tColor))
-                                if (dr + dg + db < 150) {
+                                if (dr + dg + db < 140) {
                                     matched++
                                 }
                                 checked++
@@ -682,13 +682,13 @@ class MainActivity : Activity() {
                         )
                     }
                 }
-                x += 6 // Krok skanowania dla optymalizacji prędkości
+                x += 6
             }
             y += 6
         }
 
         val message = if (detections.isEmpty()) {
-            "Nie znaleziono $target (Szablon)."
+            "Nie znaleziono $target."
         } else {
             "Znaleziono ${detections.size} x $target."
         }
