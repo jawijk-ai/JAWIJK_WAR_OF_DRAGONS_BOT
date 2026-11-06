@@ -17,7 +17,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import java.util.ArrayDeque
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -71,7 +70,7 @@ class MainActivity : Activity() {
     private val searchX1 = 200f
     private val searchY1 = 200f
     private val searchX2 = 800f
-    private val searchY2 = 600f
+    private val searchY2 = 800f // Zwiększony zakres w dół, ponad czatem
 
     private data class Detection(
         val x: Int,
@@ -446,24 +445,10 @@ class MainActivity : Activity() {
                 addLog("BRAK PLIKU $file: ${e.message}")
             }
         }
-
-        if (mystrasTemplates.size == 3) {
-            addLog("Wszystkie 3 wzorce Mystras są gotowe.")
-        } else {
-            addLog(
-                "UWAGA: wczytano ${mystrasTemplates.size}/3 wzorców Mystras."
-            )
-        }
     }
 
     private fun startScanning() {
         if (running) return
-
-        if (isMystrasMode() && mystrasTemplates.size != 3) {
-            scanStatus.text =
-                "BŁĄD: brakuje zdjęć wzorcowych w folderze assets."
-            return
-        }
 
         scanGeneration++
         running = true
@@ -530,7 +515,7 @@ class MainActivity : Activity() {
                 if (mystras) {
                     analyzeMystras(bitmap, target)
                 } else {
-                    analyzeBasic(bitmap, target)
+                    analyzeRingTemplate(bitmap, target)
                 }
             } catch (e: Exception) {
                 AnalysisResult(
@@ -557,7 +542,7 @@ class MainActivity : Activity() {
                     !isFinishing && !isDestroyed
 
                 if (valid) {
-                    showResult(result, if (mystras) "Mystras" else "Ryby podstawowe")
+                    showResult(result, if (mystras) "Mystras" else "Szablon pierścienia")
                     val point = result.detections.firstOrNull()
                     if (point != null && point.x in 0 until active.width &&
                         point.y in 0 until active.height) {
@@ -590,420 +575,131 @@ class MainActivity : Activity() {
         bitmap: Bitmap,
         target: String
     ): AnalysisResult {
-
         val template = mystrasTemplates[target]
-            ?: return AnalysisResult(
-                emptyList(),
-                "Nie znaleziono wzorca: $target",
-                bitmap.width,
-                bitmap.height
-            )
-
-        val sx = bitmap.width / referenceWidth
-        val sy = bitmap.height / referenceHeight
-
-        val left = (searchX1 * sx)
-            .toInt().coerceIn(0, bitmap.width - 1)
-
-        val top = (searchY1 * sy)
-            .toInt().coerceIn(0, bitmap.height - 1)
-
-        val right = (searchX2 * sx)
-            .toInt().coerceIn(left + 1, bitmap.width)
-
-        val bottom = (searchY2 * sy)
-            .toInt().coerceIn(top + 1, bitmap.height)
-
-        val detections = mutableListOf<Detection>()
-
-        val scales = listOf(
-            0.65f,
-            0.80f,
-            0.95f,
-            1.10f,
-            1.25f
-        )
-
-        val mask = createTemplateMask(template)
-
-        if (mask.size < 12) {
-            return AnalysisResult(
-                emptyList(),
-                "Wzorzec $target ma za mało kolorowych punktów.",
-                bitmap.width,
-                bitmap.height
-            )
-        }
-
-        for (scale in scales) {
-            val tw = (template.width * scale)
-                .toInt().coerceAtLeast(8)
-
-            val th = (template.height * scale)
-                .toInt().coerceAtLeast(8)
-
-            if (tw >= right - left || th >= bottom - top) {
-                continue
-            }
-
-            val scaledPoints = mask.map { point ->
-                TemplatePoint(
-                    (point.x * scale).toInt(),
-                    (point.y * scale).toInt(),
-                    point.color
-                )
-            }
-
-            var y = top
-
-            while (y <= bottom - th) {
-                var x = left
-
-                while (x <= right - tw) {
-                    val score = compareTemplate(
-                        bitmap,
-                        x,
-                        y,
-                        scaledPoints
-                    )
-
-                    if (score >= 0.70f) {
-                        val centerX = x + tw / 2
-                        val centerY = y + th / 2
-
-                        val duplicate = detections.any {
-                            abs(it.x - centerX) < tw / 2 &&
-                            abs(it.y - centerY) < th / 2
-                        }
-
-                        if (!duplicate) {
-                            detections.add(
-                                Detection(
-                                    centerX,
-                                    centerY,
-                                    max(tw, th) / 2,
-                                    target,
-                                    score
-                                )
-                            )
-                        }
-                    }
-
-                    x += 4
-                }
-
-                y += 4
-            }
-        }
-
-        val message = if (detections.isEmpty()) {
-            "Mystras: nie znaleziono $target. " +
-                "Obszar: $left,$top - $right,$bottom."
-        } else {
-            "Mystras: znaleziono ${detections.size} x $target."
-        }
-
-        return AnalysisResult(
-            detections,
-            message,
-            bitmap.width,
-            bitmap.height
-        )
-    }
-
-    private data class TemplatePoint(
-        val x: Int,
-        val y: Int,
-        val color: Int
-    )
-
-    private fun createTemplateMask(
-        template: Bitmap
-    ): List<TemplatePoint> {
-
-        val points = mutableListOf<TemplatePoint>()
-
-        val stepX = max(1, template.width / 35)
-        val stepY = max(1, template.height / 35)
-
-        var y = 0
-
-        while (y < template.height) {
-            var x = 0
-
-            while (x < template.width) {
-                val color = template.getPixel(x, y)
-
-                val r = Color.red(color)
-                val g = Color.green(color)
-                val b = Color.blue(color)
-
-                val maxC = max(r, max(g, b))
-                val minC = min(r, min(g, b))
-
-                val saturation = if (maxC == 0) {
-                    0f
-                } else {
-                    (maxC - minC).toFloat() / maxC
-                }
-
-                if (saturation > 0.18f && maxC > 55) {
-                    points.add(
-                        TemplatePoint(x, y, color)
-                    )
-                }
-
-                x += stepX
-            }
-
-            y += stepY
-        }
-
-        return points
-    }
-
-    private fun compareTemplate(
-        bitmap: Bitmap,
-        startX: Int,
-        startY: Int,
-        points: List<TemplatePoint>
-    ): Float {
-
-        var matched = 0
-        var checked = 0
-
-        for (point in points) {
-            val x = startX + point.x
-            val y = startY + point.y
-
-            if (x !in 0 until bitmap.width ||
-                y !in 0 until bitmap.height
-            ) {
-                continue
-            }
-
-            val actual = bitmap.getPixel(x, y)
-            val expected = point.color
-
-            val dr = abs(
-                Color.red(actual) - Color.red(expected)
-            )
-
-            val dg = abs(
-                Color.green(actual) - Color.green(expected)
-            )
-
-            val db = abs(
-                Color.blue(actual) - Color.blue(expected)
-            )
-
-            val distance = dr + dg + db
-
-            if (distance < 180) {
-                matched++
-            }
-
-            checked++
-        }
-
-        return if (checked == 0) {
-            0f
-        } else {
-            matched.toFloat() / checked.toFloat()
-        }
+            ?: return AnalysisResult(emptyList(), "Brak wzorca Mystras", bitmap.width, bitmap.height)
+        return runTemplateMatching(bitmap, template, target, 0.65f)
     }
 
     // --------------------------------------------------
-    // ANALIZATOR RYB PODSTAWOWYCH (POPRAWIONY)
+    // NOWY ANALIZATOR OPARTY NA GENEROWANYm W LOCIE SZABLONIE PIERŚCIENIA
     // --------------------------------------------------
 
-    private fun analyzeBasic(
+    private fun analyzeRingTemplate(
         bitmap: Bitmap,
         target: String
     ): AnalysisResult {
+        // Generujemy w locie wzorzec pierścienia pasujący do kółeczek z Twojego zrzutu ekranu
+        val template = generateRingBitmap(target)
 
-        val step = 3
+        return runTemplateMatching(bitmap, template, target, 0.55f)
+    }
 
-        val gridWidth =
-            (bitmap.width + step - 1) / step
+    private fun generateRingBitmap(target: String): Bitmap {
+        val size = 40 // Rozmiar szablonu kółka w pikselach
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.TRANSPARENT)
 
-        val gridHeight =
-            (bitmap.height + step - 1) / step
-
-        val mask = BooleanArray(gridWidth * gridHeight)
-
-        for (gy in 0 until gridHeight) {
-            for (gx in 0 until gridWidth) {
-
-                val x = min(gx * step, bitmap.width - 1)
-                val y = min(gy * step, bitmap.height - 1)
-
-                val color = bitmap.getPixel(x, y)
-
-                mask[gy * gridWidth + gx] =
-                    classifyBasicColor(color) == target
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+            color = when (target) {
+                "Niebieski" -> Color.rgb(100, 180, 255)
+                "Zielony" -> Color.rgb(0, 255, 100)
+                "Fioletowy" -> Color.rgb(200, 100, 255)
+                "Czerwony" -> Color.rgb(255, 50, 50)
+                else -> Color.WHITE // Szary / Biały
             }
         }
 
-        val visited = BooleanArray(mask.size)
+        // Rysujemy dwa współżyjące kręgi symulujące pulsującą falę z obrazka
+        canvas.drawCircle(size / 2f, size / 2f, 12f, paint)
+        canvas.drawCircle(size / 2f, size / 2f, 18f, paint)
+
+        return bmp
+    }
+
+    private fun runTemplateMatching(
+        bitmap: Bitmap,
+        template: Bitmap,
+        target: String,
+        threshold: Float
+    ): AnalysisResult {
+        val sx = bitmap.width / referenceWidth
+        val sy = bitmap.height / referenceHeight
+
+        val left = (searchX1 * sx).toInt().coerceIn(0, bitmap.width - 1)
+        val top = (searchY1 * sy).toInt().coerceIn(0, bitmap.height - 1)
+        val right = (searchX2 * sx).toInt().coerceIn(left + 1, bitmap.width)
+        val bottom = (searchY2 * sy).toInt().coerceIn(top + 1, bitmap.height)
+
         val detections = mutableListOf<Detection>()
+        val tw = template.width
+        val th = template.height
 
-        for (gy in 0 until gridHeight) {
-            for (gx in 0 until gridWidth) {
+        var y = top
+        while (y <= bottom - th) {
+            var x = left
+            while (x <= right - tw) {
+                var matched = 0
+                var checked = 0
 
-                val index = gy * gridWidth + gx
-
-                if (!mask[index] || visited[index]) {
-                    continue
-                }
-
-                val queue = ArrayDeque<Int>()
-
-                queue.add(index)
-                visited[index] = true
-
-                var count = 0
-                var sumX = 0
-                var sumY = 0
-
-                var minX = gx
-                var maxX = gx
-                var minY = gy
-                var maxY = gy
-
-                while (queue.isNotEmpty()) {
-                    val current = queue.removeFirst()
-
-                    val cx = current % gridWidth
-                    val cy = current / gridWidth
-
-                    count++
-                    sumX += cx
-                    sumY += cy
-
-                    minX = min(minX, cx)
-                    maxX = max(maxX, cx)
-                    minY = min(minY, cy)
-                    maxY = max(maxY, cy)
-
-                    for (dy in -1..1) {
-                        for (dx in -1..1) {
-
-                            if (dx == 0 && dy == 0) {
-                                continue
-                            }
-
-                            val nx = cx + dx
-                            val ny = cy + dy
-
-                            if (nx !in 0 until gridWidth ||
-                                ny !in 0 until gridHeight
-                            ) {
-                                continue
-                            }
-
-                            val ni = ny * gridWidth + nx
-
-                            if (mask[ni] && !visited[ni]) {
-                                visited[ni] = true
-                                queue.add(ni)
+                // Szybkie porównanie wybranych punktów szablonu z ekranem
+                for (ty in 0 until th step 4) {
+                    for (tx in 0 until tw step 4) {
+                        val tColor = template.getPixel(tx, ty)
+                        if (Color.alpha(tColor) > 50) {
+                            val px = x + tx
+                            val py = y + ty
+                            if (px in 0 until bitmap.width && py in 0 until bitmap.height) {
+                                val screenColor = bitmap.getPixel(px, py)
+                                // Porównanie odległości kolorów RGB
+                                val dr = abs(Color.red(screenColor) - Color.red(tColor))
+                                val dg = abs(Color.green(screenColor) - Color.green(tColor))
+                                val db = abs(Color.blue(screenColor) - Color.blue(tColor))
+                                if (dr + dg + db < 150) {
+                                    matched++
+                                }
+                                checked++
                             }
                         }
                     }
                 }
 
-                val width = maxX - minX + 1
-                val height = maxY - minY + 1
+                val score = if (checked == 0) 0f else matched.toFloat() / checked.toFloat()
 
-                val aspect =
-                    width.toFloat() / height.toFloat()
+                if (score >= threshold) {
+                    val centerX = x + tw / 2
+                    val centerY = y + th / 2
 
-                if (count in 15..180 && aspect in 0.8f..1.2f) {
-                    val centerX = (sumX / count) * step
-                    val centerY = (sumY / count) * step
-
-                    val tooClose = detections.any {
-                        abs(it.x - centerX) < 40 && abs(it.y - centerY) < 40
+                    val duplicate = detections.any {
+                        abs(it.x - centerX) < tw && abs(it.y - centerY) < th
                     }
 
-                    if (!tooClose) {
+                    if (!duplicate) {
                         detections.add(
-                            Detection(
-                                x = centerX,
-                                y = centerY,
-                                radius = max(width, height) * step / 2,
-                                name = target
-                            )
+                            Detection(centerX, centerY, tw / 2, target, score)
                         )
                     }
                 }
+                x += 6 // Krok skanowania dla optymalizacji prędkości
             }
+            y += 6
         }
 
         val message = if (detections.isEmpty()) {
-            "Ryby podstawowe: nie znaleziono koloru $target."
+            "Nie znaleziono $target (Szablon)."
         } else {
-            "Ryby podstawowe: znaleziono " +
-                "${detections.size} obszarów: $target."
+            "Znaleziono ${detections.size} x $target."
         }
 
-        return AnalysisResult(
-            detections,
-            message,
-            bitmap.width,
-            bitmap.height
-        )
-    }
-
-    private fun classifyBasicColor(
-        color: Int
-    ): String? {
-
-        val hsv = FloatArray(3)
-        Color.colorToHSV(color, hsv)
-
-        val h = hsv[0]
-        val s = hsv[1]
-        val v = hsv[2]
-
-        // Odrzucamy tylko całkowicie ciemne tło wody
-        if (v < 0.10f) return null
-
-        // Szary / Biały (pulsujące kółka jasne)
-        if (s < 0.35f && v > 0.40f) {
-            return "Szary"
-        }
-
-        if (s < 0.12f) return null
-
-        // Czerwony
-        if ((h <= 25f || h >= 325f) && s > 0.12f && v > 0.15f) {
-            return "Czerwony"
-        }
-
-        // Fioletowy
-        if (h in 225f..325f && s > 0.12f && v > 0.15f) {
-            return "Fioletowy"
-        }
-
-        // Niebieski
-        if (h in 160f..235f && s > 0.12f && v > 0.15f) {
-            return "Niebieski"
-        }
-
-        // Zielony
-        if (h in 45f..165f && s > 0.12f && v > 0.15f) {
-            return "Zielony"
-        }
-
-        return null
+        return AnalysisResult(detections, message, bitmap.width, bitmap.height)
     }
 
     private fun showResult(
         result: AnalysisResult,
         mode: String
     ) {
-
         markerView.setDetections(
             result.detections,
             result.imageWidth,
@@ -1011,46 +707,21 @@ class MainActivity : Activity() {
         )
 
         scanStatus.text = result.message
-
-        addLog(
-            "Skan $scanCount | $mode | ${result.message}"
-        )
-
-        if (result.detections.isNotEmpty()) {
-
-            val first = result.detections.first()
-
-            addLog(
-                "Pierwszy punkt: X=${first.x}, Y=${first.y}"
-            )
-
-            if (result.detections.size > 1) {
-                addLog(
-                    "Pozostałe punkty: " +
-                        "${result.detections.size - 1}"
-                )
-            }
-        }
+        addLog("Skan $scanCount | $mode | ${result.message}")
     }
 
     private fun addLog(message: String) {
-
         if (!::logText.isInitialized) return
-
         runOnUiThread {
-
             val time = java.text.SimpleDateFormat(
                 "HH:mm:ss",
                 java.util.Locale.getDefault()
             ).format(java.util.Date())
-
             logText.append("[$time] $message\n")
-
             if (logText.lineCount > 300) {
                 val all = logText.text.toString()
                 logText.text = all.takeLast(12000)
             }
-
             if (::logScroll.isInitialized) {
                 logScroll.post {
                     logScroll.fullScroll(View.FOCUS_DOWN)
@@ -1060,41 +731,30 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
-
         val popup = popupWebView
-
         if (popup != null) {
-
             webContainer.removeView(popup)
-
             popup.stopLoading()
             popup.destroy()
-
             popupWebView = null
-
             addLog("Zamknięto dodatkowe okno.")
             return
         }
-
         if (webView.canGoBack()) {
             webView.goBack()
             return
         }
-
         super.onBackPressed()
     }
 
     override fun onDestroy() {
-
         running = false
         handler.removeCallbacksAndMessages(null)
-
         popupWebView?.let {
             webContainer.removeView(it)
             it.stopLoading()
             it.destroy()
         }
-
         popupWebView = null
 
         if (::webView.isInitialized) {
@@ -1103,13 +763,9 @@ class MainActivity : Activity() {
         }
 
         mystrasTemplates.values.forEach {
-            if (!it.isRecycled) {
-                it.recycle()
-            }
+            if (!it.isRecycled) it.recycle()
         }
-
         mystrasTemplates.clear()
-
         super.onDestroy()
     }
 
@@ -1117,13 +773,8 @@ class MainActivity : Activity() {
         context: android.content.Context
     ) : View(context) {
 
-        private val paint = Paint(
-            Paint.ANTI_ALIAS_FLAG
-        )
-
-        private var detections: List<Detection> =
-            emptyList()
-
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var detections: List<Detection> = emptyList()
         private var sourceWidth = 1
         private var sourceHeight = 1
 
@@ -1133,10 +784,8 @@ class MainActivity : Activity() {
             imageHeight: Int
         ) {
             detections = newDetections
-
             sourceWidth = max(1, imageWidth)
             sourceHeight = max(1, imageHeight)
-
             invalidate()
         }
 
@@ -1147,7 +796,6 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-
             if (detections.isEmpty()) return
 
             val scaleX = width.toFloat() / sourceWidth.toFloat()
