@@ -561,17 +561,21 @@ class MainActivity : Activity() {
                     val point = result.detections.firstOrNull()
                     if (point != null && point.x in 0 until active.width &&
                         point.y in 0 until active.height) {
+                        
+                        val targetX = point.x + active.scrollX
+                        val targetY = point.y + active.scrollY
+
                         val now = android.os.SystemClock.uptimeMillis()
                         val down = android.view.MotionEvent.obtain(now, now,
                             android.view.MotionEvent.ACTION_DOWN,
-                            point.x.toFloat(), point.y.toFloat(), 0)
+                            targetX.toFloat(), targetY.toFloat(), 0)
                         val up = android.view.MotionEvent.obtain(now, now,
                             android.view.MotionEvent.ACTION_UP,
-                            point.x.toFloat(), point.y.toFloat(), 0)
+                            targetX.toFloat(), targetY.toFloat(), 0)
                         try {
                             active.dispatchTouchEvent(down)
                             active.dispatchTouchEvent(up)
-                            addLog("Wysłano dotyk: X=" + point.x + ", Y=" + point.y)
+                            addLog("Wysłano dotyk: X=$targetX, Y=$targetY")
                         } finally {
                             down.recycle()
                             up.recycle()
@@ -914,13 +918,10 @@ class MainActivity : Activity() {
                 val aspect =
                     width.toFloat() / height.toFloat()
 
-                // POPRAWKA TUTAJ: Ograniczenie rozmiaru (15..180) oraz rygorystyczne proporcje okręgu (0.8f..1.2f),
-                // co eliminuje wielkie plamy z połączonych kółek i śmiecie z tła.
                 if (count in 15..180 && aspect in 0.8f..1.2f) {
                     val centerX = (sumX / count) * step
                     val centerY = (sumY / count) * step
 
-                    // Zabezpieczenie przed nakładającymi się klastrami (odrzuca zbyt bliskie duplikaty)
                     val tooClose = detections.any {
                         abs(it.x - centerX) < 40 && abs(it.y - centerY) < 40
                     }
@@ -965,32 +966,33 @@ class MainActivity : Activity() {
         val s = hsv[1]
         val v = hsv[2]
 
-        if (v < 0.12f) return null
+        // Odrzucamy tylko całkowicie ciemne tło wody
+        if (v < 0.10f) return null
 
-        // Szary
-        if (s < 0.20f && v > 0.25f) {
+        // Szary / Biały (pulsujące kółka jasne)
+        if (s < 0.35f && v > 0.40f) {
             return "Szary"
         }
 
-        if (s < 0.20f) return null
+        if (s < 0.12f) return null
 
         // Czerwony
-        if ((h <= 12f || h >= 345f) && s > 0.35f) {
+        if ((h <= 25f || h >= 325f) && s > 0.12f && v > 0.15f) {
             return "Czerwony"
         }
 
         // Fioletowy
-        if (h in 250f..315f && s > 0.25f) {
+        if (h in 225f..325f && s > 0.12f && v > 0.15f) {
             return "Fioletowy"
         }
 
         // Niebieski
-        if (h in 190f..250f && s > 0.25f) {
+        if (h in 160f..235f && s > 0.12f && v > 0.15f) {
             return "Niebieski"
         }
 
         // Zielony
-        if (h in 70f..165f && s > 0.25f) {
+        if (h in 45f..165f && s > 0.12f && v > 0.15f) {
             return "Zielony"
         }
 
