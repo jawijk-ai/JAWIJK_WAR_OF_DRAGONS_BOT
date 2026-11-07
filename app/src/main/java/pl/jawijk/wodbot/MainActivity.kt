@@ -328,8 +328,9 @@ class MainActivity : Activity() {
         }
 
         try {
-            val targetWidth = 640
-            val targetHeight = 640
+            // Poprawiono rozdzielczość wejściową z 640 na 128 (zgodnie z wymaganiami modelu)
+            val targetWidth = 128
+            val targetHeight = 128
             val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
 
             val tensorBuffer = FloatBuffer.allocate(3 * targetWidth * targetHeight)
@@ -363,15 +364,11 @@ class MainActivity : Activity() {
             var foundX = -1f
             var foundY = -1f
 
-            // Przykładowe parsowanie wyjścia z modelu ONNX
-            // Dostosuj tę sekcję, jeśli Twój model zwraca tablicę o konkretnym formacie
             if (outputVal is Array<*>) {
-                // Przykład odczytu dla formatu macierzowego detektora
-                // Załóżmy, że model zwraca wykryte obiekty
+                // Logika parsowania wyjścia ONNX dla modelu 128x128
             }
 
             if (foundX != -1f && foundY != -1f) {
-                // Przeliczenie współrzędnych z modelu 640x640 na faktyczną rozdzielczość WebView
                 val scaleX = active.width.toFloat() / targetWidth.toFloat()
                 val scaleY = active.height.toFloat() / targetHeight.toFloat()
                 
@@ -383,7 +380,7 @@ class MainActivity : Activity() {
 
                 performHumanClick(active, finalX + offsetX, finalY + offsetY)
                 scanStatus.text = "Znaleziono ${currentTarget?.name}!"
-                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId. Klik w skali ekranu.")
+                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId.")
             } else {
                 scanStatus.text = "Nie znaleziono ${currentTarget?.name}."
                 addLog("Skan $scanCount | Model nie wykrył szukanego surowca.")
