@@ -185,6 +185,22 @@ class MainActivity : Activity() {
         buttons.addView(stopButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons)
 
+        // Przycisk awaryjny do zamknięcia okna logowania / popupu
+        val closePopupBtn = Button(this).apply {
+            text = "ZAMKNIJ OKNO LOGOWANIA"
+            setOnClickListener {
+                popupWebView?.let { popup ->
+                    webContainer.removeView(popup)
+                    popup.destroy()
+                    popupWebView = null
+                    addLog("Ręcznie zamknięto okno popup.")
+                } ?: run {
+                    addLog("Brak aktywnego okna popup do zamknięcia.")
+                }
+            }
+        }
+        root.addView(closePopupBtn)
+
         status = TextView(this).apply {
             text = "Status: gotowy"
             textSize = 13f
@@ -253,13 +269,23 @@ class MainActivity : Activity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = WebViewClient()
+
         webView.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                val popup = WebView(this@MainActivity)
-                popup.settings.javaScriptEnabled = true
-                popup.settings.domStorageEnabled = true
-                popup.webViewClient = WebViewClient()
-                popup.webChromeClient = this
+                val popup = WebView(this@MainActivity).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.databaseEnabled = true
+                    settings.setSupportMultipleWindows(true)
+                    
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            addLog("Popup URL: $url")
+                        }
+                    }
+                    webChromeClient = this@object
+                }
 
                 popupWebView?.let { old ->
                     webContainer.removeView(old)
@@ -268,11 +294,24 @@ class MainActivity : Activity() {
 
                 popupWebView = popup
                 webContainer.addView(popup, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                
                 val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
                 transport.webView = popup
                 resultMsg.sendToTarget()
-                addLog("Otwarto okno gry (Popup).")
+                addLog("Otwarto okno logowania/popup.")
                 return true
+            }
+
+            override fun onCloseWindow(window: WebView?) {
+                super.onCloseWindow(window)
+                window?.let {
+                    webContainer.removeView(it)
+                    it.destroy()
+                }
+                if (popupWebView == window) {
+                    popupWebView = null
+                }
+                addLog("Zamknięto okno logowania przez aplikację.")
             }
         }
     }
@@ -328,7 +367,7 @@ class MainActivity : Activity() {
         }
 
         try {
-            // Poprawiono rozdzielczość wejściową z 640 na 128 (zgodnie z wymaganiami modelu)
+            // Wymiar zgodny z modelem 128x128
             val targetWidth = 128
             val targetHeight = 128
             val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
@@ -364,8 +403,41 @@ class MainActivity : Activity() {
             var foundX = -1f
             var foundY = -1f
 
-            if (outputVal is Array<*>) {
-                // Logika parsowania wyjścia ONNX dla modelu 128x128
+            try {
+                if (outputVal is Array<*>) {
+                    for (row in outputVal) {
+                        if (row is FloatArray && row.size >= 6) {
+                            val xCoord = row[0]
+                            val yCoord = row[1]
+                            val confidence = row[4]
+                            val classId = row[5].toInt()
+
+                            if (classId == expectedClassId && confidence > 0.5f) {
+                                foundX = xCoord
+                                foundY = yCoord
+                                break
+                            }
+                        } else if (row is Array<*>) {
+                            for (innerRow in row) {
+                                if (innerRow is FloatArray && innerRow.size >= 6) {
+                                    val xCoord = innerRow[0]
+                                    val yCoord = innerRow[1]
+                                    val confidence = innerRow[4]
+                                    val classId = innerRow[5].toInt()
+
+                                    if (classId == expectedClassId && confidence > 0.5f) {
+                                        foundX = xCoord
+                                        foundY = yCoord
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                        if (foundX != -1f) break
+                    }
+                }
+            } catch (parseEx: Exception) {
+                addLog("Błąd parsowania wyjścia ONNX: ${parseEx.message}")
             }
 
             if (foundX != -1f && foundY != -1f) {
@@ -380,10 +452,10 @@ class MainActivity : Activity() {
 
                 performHumanClick(active, finalX + offsetX, finalY + offsetY)
                 scanStatus.text = "Znaleziono ${currentTarget?.name}!"
-                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId.")
+                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId w punkcie ($finalX, $finalY).")
             } else {
                 scanStatus.text = "Nie znaleziono ${currentTarget?.name}."
-                addLog("Skan $scanCount | Model nie wykrył szukanego surowca.")
+                addLog("Skan $scanCount | Model nie wykrył surowca dla ID $expectedClassId.")
             }
 
         } catch (e: Exception) {
