@@ -4,8 +4,6 @@ import android.app.Activity
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
 import android.view.Gravity
 import android.view.View
@@ -15,17 +13,13 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import ai.onnxruntime.OnnxTensor
-import ai.onnxruntime.OrtEnvironment
-import ai.onnxruntime.OrtSession
+import org.json.JSONArray
 import org.json.JSONObject
-import java.nio.FloatBuffer
 import kotlin.random.Random
 
 // Modele danych dla JSON
 data class TargetItem(val name: String, val classId: Int)
 data class CategoryItem(val name: String, val targets: List<TargetItem>)
-data class ScanArea(val startXPct: Float, val endXPct: Float, val startYPct: Float, val endYPct: Float)
 
 class MainActivity : Activity() {
 
@@ -48,27 +42,13 @@ class MainActivity : Activity() {
 
     // Dane z plików JSON
     private var categoriesData: List<CategoryItem> = listOf()
-    private var scanArea = ScanArea(0.1f, 0.9f, 0.25f, 0.65f)
-
-    // Inicjalizacja ONNX Runtime
-    private val ortEnvironment: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
-    private val ortSession: OrtSession? by lazy {
-        try {
-            val inputStream = assets.open("mini_solver.onnx")
-            val modelBytes = inputStream.readBytes()
-            ortEnvironment.createSession(modelBytes)
-        } catch (e: Exception) {
-            addLog("Błąd ładowania modelu ONNX: ${e.message}")
-            null
-        }
-    }
 
     private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
 
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (running) {
-                scanAndClickWithOnnx()
+                fetchAndClickFromDOM()
                 
                 val baseInterval = selectedInterval() * 1000L
                 val randomJitter = Random.nextLong(-baseInterval / 5, baseInterval / 5)
@@ -125,20 +105,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             addLog("Błąd wczytywania collectables.json: ${e.message}")
         }
-
-        try {
-            val locationsStr = assets.open("locations.json").bufferedReader().use { it.readText() }
-            val locJson = JSONObject(locationsStr).getJSONObject("default_scan_area")
-            scanArea = ScanArea(
-                locJson.getDouble("start_x_pct").toFloat(),
-                locJson.getDouble("end_x_pct").toFloat(),
-                locJson.getDouble("start_y_pct").toFloat(),
-                locJson.getDouble("end_y_pct").toFloat()
-            )
-            addLog("Wczytano locations.json pomyślnie.")
-        } catch (e: Exception) {
-            addLog("Błąd wczytywania locations.json: ${e.message}")
-        }
     }
 
     private fun buildInterface() {
@@ -149,7 +115,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT (ONNX + JSON)"
+            text = "JAWIJK WOD BOT (DOM-FIRST)"
             textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -198,13 +164,6 @@ class MainActivity : Activity() {
         buttons.addView(startButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         buttons.addView(stopButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons)
-
-        // Przycisk do automatycznego kliknięcia "Gotowe" w oknie gry
-        val gotoweButton = Button(this).apply {
-            text = "KLIKNIJ 'GOTOWE' W OKNIE"
-            setOnClickListener { clickGotoweButton() }
-        }
-        root.addView(gotoweButton)
 
         // Przycisk awaryjny do zamknięcia okna logowania / popupu
         val closePopupBtn = Button(this).apply {
@@ -338,30 +297,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun clickGotoweButton() {
-        val active = popupWebView ?: webView
-        val jsCode = """
-            (function() {
-                var buttons = document.querySelectorAll('button, div, span, a');
-                for (var i = 0; i < buttons.length; i++) {
-                    if (buttons[i].innerText && buttons[i].innerText.trim() === 'Gotowe') {
-                        buttons[i].click();
-                        return "Clicked Gotowe";
-                    }
-                }
-                return "Not found";
-            })();
-        """.trimIndent()
-
-        active.evaluateJavascript(jsCode) { result ->
-            if (result != null && result.contains("Clicked Gotowe")) {
-                addLog("Automatycznie kliknięto przycisk 'Gotowe' i zamknięto okno.")
-            } else {
-                addLog("Nie znaleziono przycisku 'Gotowe' na ekranie.")
-            }
-        }
-    }
-
     private fun selectedInterval() = intervalValues.getOrElse(intervalSpinner.selectedItemPosition) { 20 }
     
     private fun selectedTargetItem(): TargetItem? {
@@ -372,15 +307,10 @@ class MainActivity : Activity() {
 
     private fun startScanning() {
         if (running) return
-        if (ortSession == null) {
-            scanStatus.text = "Błąd: Brak modelu ONNX!"
-            addLog("Nie można uruchomić bota - model ONNX nie został załadowany.")
-            return
-        }
         running = true
-        status.text = "Status: bot działa (ONNX + JSON)"
+        status.text = "Status: bot działa (DOM-First)"
         status.setTextColor(Color.GREEN)
-        addLog("Uruchomiono bota.")
+        addLog("Uruchomiono bota w trybie DOM-First.")
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
     }
@@ -394,130 +324,69 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    private fun scanAndClickWithOnnx() {
+    // GŁÓwna metoda: Odczyt z kodu gry (DOM) i automatyczne kliknięcie w pozycję elementu
+    private fun fetchAndClickFromDOM() {
         val active = popupWebView ?: webView
         if (active.width <= 0 || active.height <= 0) return
 
         scanCount++
-        val currentTarget = selectedTargetItem()
-        scanStatus.text = "Skanowanie nr $scanCount (${currentTarget?.name ?: "Cel"})..."
-        val session = ortSession ?: return
+        val currentTarget = selectedTargetItem() ?: return
+        scanStatus.text = "Skanowanie DOM nr $scanCount (${currentTarget.name})..."
 
-        val bitmap = try {
-            Bitmap.createBitmap(active.width, active.height, Bitmap.Config.ARGB_8888).also {
-                active.draw(Canvas(it))
-            }
-        } catch (e: Exception) {
-            scanStatus.text = "Błąd zrzutu: ${e.message}"
-            return
-        }
-
-        try {
-            val targetWidth = 128
-            val targetHeight = 128
-            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
-
-            val tensorBuffer = FloatBuffer.allocate(3 * targetWidth * targetHeight)
-            for (channel in 0..2) {
-                for (y in 0 until targetHeight) {
-                    for (x in 0 until targetWidth) {
-                        val px = scaledBitmap.getPixel(x, y)
-                        val v = when (channel) {
-                            0 -> Color.red(px)
-                            1 -> Color.green(px)
-                            else -> Color.blue(px)
-                        }
-                        tensorBuffer.put(v.toFloat() / 255.0f)
-                    }
-                }
-            }
-            tensorBuffer.rewind()
-            scaledBitmap.recycle()
-
-            val shape = longArrayOf(1, 3, targetHeight.toLong(), targetWidth.toLong())
-            val inputTensor = OnnxTensor.createTensor(ortEnvironment, tensorBuffer, shape)
-            val inputName = session.inputNames.iterator().next()
-
-            val results = session.run(mapOf(inputName to inputTensor))
-            inputTensor.close()
-
-            val outputTensor = results[0]
-            val outputVal = outputTensor.value
-            
-            // DIAGNOSTYKA: Wypisujemy kształt wyjściowy modelu do logów aplikacji
-            val info = StringBuilder("Shape: ")
-            if (outputTensor.info is ai.onnxruntime.TensorInfo) {
-                val tInfo = outputTensor.info as ai.onnxruntime.TensorInfo
-                info.append(tInfo.shape.contentToString())
-            }
-            addLog("ONNX Wyjście [$info]")
-
-            results.close()
-
-            val expectedClassId = currentTarget?.classId ?: 0
-            var foundX = -1f
-            var foundY = -1f
-
-            try {
-                if (outputVal is Array<*>) {
-                    for (row in outputVal) {
-                        when (row) {
-                            is FloatArray -> {
-                                if (row.size >= 6) {
-                                    val xCoord = row[0]
-                                    val yCoord = row[1]
-                                    val conf = row[4]
-                                    val cls = row[5].toInt()
-                                    if (cls == expectedClassId && conf > 0.3f) {
-                                        foundX = xCoord
-                                        foundY = yCoord
-                                        break
-                                    }
-                                }
-                            }
-                            is Array<*> -> {
-                                for (inner in row) {
-                                    if (inner is FloatArray && inner.size >= 6) {
-                                        val xCoord = inner[0]
-                                        val yCoord = inner[1]
-                                        val conf = inner[4]
-                                        val cls = inner[5].toInt()
-                                        if (cls == expectedClassId && conf > 0.3f) {
-                                            foundX = xCoord
-                                            foundY = yCoord
-                                            break
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if (foundX != -1f) break
-                    }
-                }
-            } catch (parseEx: Exception) {
-                addLog("Błąd parsowania: ${parseEx.message}")
-            }
-
-            if (foundX != -1f && foundY != -1f) {
-                val scaleX = active.width.toFloat() / targetWidth.toFloat()
-                val scaleY = active.height.toFloat() / targetHeight.toFloat()
+        // Skrypt JavaScript przeszukujący elementy gry w poszukiwaniu obiektów pasujących do wybranego celu oraz ich pozycji (bounding client rect)
+        val jsCode = """
+            (function() {
+                var targetName = "${currentTarget.name}".toLowerCase();
+                var results = [];
                 
-                val finalX = (foundX * scaleX) + active.scrollX
-                val finalY = (foundY * scaleY) + active.scrollY
+                // Szukamy elementów w grze, które reprezentują zasoby/moby na planszy (np. ikony, linki, obiekty z klasami gry)
+                // Przesukujemy powszechne selektory interaktywne na mapie
+                var elements = document.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
+                
+                elements.forEach(function(el) {
+                    var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').toLowerCase();
+                    if (text.includes(targetName)) {
+                        var rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            results.push({
+                                x: rect.left + rect.width / 2,
+                                y: rect.top + rect.height / 2
+                            });
+                        }
+                    }
+                });
+                
+                return JSON.stringify(results);
+            })();
+        """.trimIndent()
 
-                performHumanClick(active, finalX, finalY)
-                scanStatus.text = "Znaleziono ${currentTarget?.name}!"
-                addLog("Skan $scanCount | Kliknięto w ($finalX, $finalY).")
-            } else {
-                scanStatus.text = "Nie znaleziono ${currentTarget?.name}."
-                addLog("Skan $scanCount | Brak dopasowania dla ID $expectedClassId.")
+        active.evaluateJavascript(jsCode) { jsonResult ->
+            try {
+                if (jsonResult != null && jsonResult != "null" && jsonResult != "[]") {
+                    val jsonArray = JSONArray(jsonResult)
+                    if (jsonArray.length() > 0) {
+                        // Pobieramy współrzędne pierwszego znalezionego elementu
+                        val obj = jsonArray.getJSONObject(0)
+                        val x = obj.getDouble("x").toFloat()
+                        val y = obj.getDouble("y").toFloat()
+
+                        val finalX = x + active.scrollX
+                        val finalY = y + active.scrollY
+
+                        val offsetX = Random.nextInt(-4, 5)
+                        val offsetY = Random.nextInt(-4, 5)
+
+                        performHumanClick(active, finalX + offsetX, finalY + offsetY)
+                        scanStatus.text = "Znaleziono i kliknięto ${currentTarget.name}!"
+                        addLog("Skan $scanCount | DOM: Kliknięto ${currentTarget.name} w punkcie ($finalX, $finalY).")
+                        return@evaluateJavascript
+                    }
+                }
+                scanStatus.text = "Nie znaleziono ${currentTarget.name} w DOM."
+                addLog("Skan $scanCount | DOM: Brak obiektów dla '${currentTarget.name}'.")
+            } catch (e: Exception) {
+                addLog("Błąd parsowania wynikowej pozycji DOM: ${e.message}")
             }
-
-        } catch (e: Exception) {
-            scanStatus.text = "Błąd ONNX: ${e.message}"
-            addLog("Wyjątek ONNX: ${e.message}")
-        } finally {
-            bitmap.recycle()
         }
     }
 
@@ -539,9 +408,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         running = false
         handler.removeCallbacksAndMessages(null)
-        try {
-            ortSession?.close()
-        } catch (_: Exception) {}
         super.onDestroy()
     }
 }
