@@ -12,6 +12,7 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.JavascriptInterface
 import android.widget.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,8 +36,7 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // Dynamiczna lista celów
-    private var currentAvailableTargets: MutableList<String> = mutableListOf("Wczytaj lokację...")
+    private var currentAvailableTargets: MutableList<String> = mutableListOf("Oczekiwanie na dane z gry...")
 
     private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
 
@@ -83,7 +83,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT (FIXED DOM)"
+            text = "JAWIJK WOD BOT (NETWORK HOOK)"
             textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -92,8 +92,11 @@ class MainActivity : Activity() {
         root.addView(title)
 
         val refreshTargetsBtn = Button(this).apply {
-            text = "ODŚWIEŻ SUROWCE Z LOKACJI"
-            setOnClickListener { refreshLocationTargets() }
+            text = "ODŚWIEŻ / SPRAWDŹ DANE LOKACJI"
+            setOnClickListener { 
+                addLog("Przeładowywano / sprawdzono bufor sieciowy...")
+                injectNetworkSniffer()
+            }
         }
         root.addView(refreshTargetsBtn)
 
@@ -205,7 +208,25 @@ class MainActivity : Activity() {
 
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-        webView.webViewClient = WebViewClient()
+        
+        // Dodanie interfejsu do komunikacji JavaScript -> Kotlin
+        webView.addJavascriptInterface(WebAppInterface { namesList ->
+            if (namesList.isNotEmpty()) {
+                runOnUiThread {
+                    currentAvailableTargets = namesList.toMutableList()
+                    updateTargetSpinner()
+                    addLog("Przechwycono z sieci (${namesList.size} pozycji): ${namesList.joinToString(", ")}")
+                }
+            }
+        }, "AndroidBridge")
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                addLog("Strona załadowana. Wstrzykiwanie nasłuchu sieciowego...")
+                injectNetworkSniffer()
+            }
+        }
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
@@ -219,7 +240,6 @@ class MainActivity : Activity() {
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            addLog("Popup URL: $url")
                         }
                     }
                     webChromeClient = chromeClientRef
@@ -236,7 +256,6 @@ class MainActivity : Activity() {
                 val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
                 transport.webView = popup
                 resultMsg.sendToTarget()
-                addLog("Otwarto okno logowania/popup.")
                 return true
             }
 
@@ -249,9 +268,90 @@ class MainActivity : Activity() {
                 if (popupWebView == window) {
                     popupWebView = null
                 }
-                addLog("Zamknięto okno logowania przez aplikację.")
             }
         }
+    }
+
+    // Klasa mostka do odbierania danych z JS
+    class WebInterface(private val onTargetsFound: (List<String>) -> Unit) {
+        @JavascriptInterface
+        fun postTargets(jsonArrayStr: String) {
+            try {
+                val arr = JSONArray(jsonArrayStr)
+                val list = mutableListOf<String>()
+                for (i in 0 until arr.length()) {
+                    list.add(arr.getString(i))
+                }
+                onTargetsFound(list)
+            } catch (_: Exception) {}
+        }
+    }
+    // Alias dla kompatybilności nazwy
+    private fun WebAppInterface(onTargetsFound: (List<String>) -> Unit) = WebInterface(onTargetsFound)
+
+    // Wstrzykiwanie skryptu przechwytującego ruch sieciowy hunt_conf.php
+    private fun injectNetworkSniffer() {
+        val active = popupWebView ?: webView
+        val snifferJs = """
+            (function() {
+                if (window.jawijkHooked) return;
+                window.jawijkHooked = true;
+
+                // Hook fetch
+                const origFetch = window.fetch;
+                window.fetch = async function(...args) {
+                    const response = await origFetch.apply(this, args);
+                    try {
+                        const url = args[0] || '';
+                        if (typeof url === 'string' && url.includes('hunt_conf.php')) {
+                            const clone = response.clone();
+                            clone.text().then(text => parseAndSend(text));
+                        }
+                    } catch(e) {}
+                    return response;
+                };
+
+                // Hook XMLHttpRequest
+                const origOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    this._url = url;
+                    return origOpen.apply(this, arguments);
+                };
+
+                const origSend = XMLHttpRequest.prototype.send;
+                XMLHttpRequest.prototype.send = function() {
+                    this.addEventListener('load', function() {
+                        try {
+                            if (this._url && typeof this._url === 'string' && this._url.includes('hunt_conf.php')) {
+                                parseAndSend(this.responseText);
+                            }
+                        } catch(e) {}
+                    });
+                    return origSend.apply(this, arguments);
+                };
+
+                function parseAndSend(dataStr) {
+                    try {
+                        let names = [];
+                        // Parsowanie prostego XML / stringów z name="..."
+                        let matches = dataStr.match(/name="([^"]+)"/g);
+                        if (matches) {
+                            matches.forEach(m => {
+                                let val = m.replace('name="', '').replace('"', '').trim();
+                                if (val.length > 2 && !names.includes(val)) {
+                                    names.push(val);
+                                }
+                            });
+                        }
+                        if (names.length > 0 && window.AndroidBridge) {
+                            window.AndroidBridge.postTargets(JSON.stringify(names));
+                        }
+                    } catch(e) {}
+                }
+            })();
+        """.trimIndent()
+
+        active.evaluateJavascript(snifferJs, null)
     }
 
     private fun selectedInterval() = intervalValues.getOrElse(intervalSpinner.selectedItemPosition) { 20 }
@@ -263,9 +363,10 @@ class MainActivity : Activity() {
     private fun startScanning() {
         if (running) return
         running = true
-        status.text = "Status: bot działa"
+        status.text = "Status: bot działa (Network Hook)"
         status.setTextColor(Color.GREEN)
         addLog("Uruchomiono bota.")
+        injectNetworkSniffer()
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
     }
@@ -279,76 +380,14 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    private fun refreshLocationTargets() {
-        val active = popupWebView ?: webView
-        val jsCode = """
-            (function() {
-                var foundNames = [];
-                var allElements = document.querySelectorAll('div, span, a, img');
-                var ignoreList = ["tablica", "poziom", "stopień", "męstwo", "opis", "zaloguj", "hasło", "rejestracja", "menu", "główny"];
-
-                allElements.forEach(function(el) {
-                    var text = (el.innerText || el.getAttribute('alt') || el.getAttribute('title') || '').trim();
-                    var lower = text.toLowerCase();
-
-                    if (text.length > 2 && text.length < 35) {
-                        var shouldIgnore = ignoreList.some(function(word) {
-                            return lower.includes(word);
-                        });
-
-                        if (!shouldIgnore && !foundNames.includes(text)) {
-                            foundNames.push(text);
-                        }
-                    }
-                });
-                
-                return JSON.stringify({ count: allElements.length, items: foundNames });
-            })();
-        """.trimIndent()
-
-        active.evaluateJavascript(jsCode) { rawResult ->
-            try {
-                var jsonResult = rawResult ?: "{}"
-                if (jsonResult.startsWith("\"") && jsonResult.endsWith("\"")) {
-                    jsonResult = jsonResult.substring(1, jsonResult.length - 1)
-                        .replace("\\\"", "\"")
-                        .replace("\\\\", "\\")
-                }
-
-                val jsonObj = JSONObject(jsonResult)
-                val totalChecked = jsonObj.optInt("count", 0)
-                val jsonArray = jsonObj.getJSONArray("items")
-
-                val newTargets = mutableListOf<String>()
-                for (i in 0 until jsonArray.length()) {
-                    newTargets.add(jsonArray.getString(i))
-                }
-
-                addLog("Przeskanowano elementów w DOM: $totalChecked, znaleziono: ${newTargets.size}")
-
-                if (newTargets.isNotEmpty()) {
-                    runOnUiThread {
-                        currentAvailableTargets = newTargets
-                        updateTargetSpinner()
-                        addLog("Zaktualizowano listę w Spinnerze.")
-                    }
-                } else {
-                    addLog("Brak pasujących tekstów w DOM.")
-                }
-            } catch (e: Exception) {
-                addLog("Błąd parsowania: ${e.message}")
-            }
-        }
-    }
-
     private fun fetchAndClickFromDOM() {
         val active = popupWebView ?: webView
         if (active.width <= 0 || active.height <= 0) return
 
         scanCount++
         val targetName = selectedTargetName()
-        if (targetName.isBlank() || targetName.startsWith("Wczytaj")) {
-            scanStatus.text = "Wybierz poprawny cel!"
+        if (targetName.isBlank() || targetName.startsWith("Oczekiwanie")) {
+            scanStatus.text = "Wybierz cel!"
             return
         }
 
@@ -401,14 +440,14 @@ class MainActivity : Activity() {
 
                         performHumanClick(active, finalX + offsetX, finalY + offsetY)
                         scanStatus.text = "Znaleziono i kliknięto $targetName!"
-                        addLog("Skan $scanCount | Kliknięto $targetName w punkcie ($finalX, $finalY).")
+                        addLog("Skan $scanCount | Kliknięto $targetName w ($finalX, $finalY).")
                         return@evaluateJavascript
                     }
                 }
                 scanStatus.text = "Nie znaleziono $targetName."
                 addLog("Skan $scanCount | Brak obiektu '$targetName' na planszy.")
             } catch (e: Exception) {
-                addLog("Błąd kliknięcia DOM: ${e.message}")
+                addLog("Błąd kliknięcia: ${e.message}")
             }
         }
     }
