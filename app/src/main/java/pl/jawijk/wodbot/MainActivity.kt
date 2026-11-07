@@ -7,7 +7,6 @@ import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -16,10 +15,17 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
+import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OrtEnvironment
+import ai.onnxruntime.OrtSession
+import org.json.JSONObject
+import java.nio.FloatBuffer
 import kotlin.random.Random
+
+// Modele danych dla JSON
+data class TargetItem(val name: String, val classId: Int)
+data class CategoryItem(val name: String, val targets: List<TargetItem>)
+data class ScanArea(val startXPct: Float, val endXPct: Float, val startYPct: Float, val endYPct: Float)
 
 class MainActivity : Activity() {
 
@@ -35,34 +41,35 @@ class MainActivity : Activity() {
     private lateinit var logScroll: ScrollView
 
     private var popupWebView: WebView? = null
-
     private var running = false
     private var scanCount = 0
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private val basicTargets = listOf(
-        "Niebieski",
-        "Fioletowy",
-        "Szary",
-        "Zielony",
-        "Czerwony"
-    )
+    // Dane z plików JSON
+    private var categoriesData: List<CategoryItem> = listOf()
+    private var scanArea = ScanArea(0.1f, 0.9f, 0.25f, 0.65f)
 
-    private val mystrasTargets = listOf(
-        "Golden Shams",
-        "Coastal Shamsu",
-        "Mystras Serpentfish"
-    )
+    // Inicjalizacja ONNX Runtime
+    private val ortEnvironment: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
+    private val ortSession: OrtSession? by lazy {
+        try {
+            val inputStream = assets.open("mini_solver.onnx")
+            val modelBytes = inputStream.readBytes()
+            ortEnvironment.createSession(modelBytes)
+        } catch (e: Exception) {
+            addLog("Błąd ładowania modelu ONNX: ${e.message}")
+            null
+        }
+    }
 
     private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
 
     private val scanRunnable = object : Runnable {
         override fun run() {
             if (running) {
-                scanAndClickCanvas()
+                scanAndClickWithOnnx()
                 
-                // Randomizacja częstotliwości (-20% do +20%)
                 val baseInterval = selectedInterval() * 1000L
                 val randomJitter = Random.nextLong(-baseInterval / 5, baseInterval / 5)
                 val nextDelay = (baseInterval + randomJitter).coerceAtLeast(3000L)
@@ -74,9 +81,50 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        loadConfigs()
         buildInterface()
         configureWebView()
         webView.loadUrl("https://warofdragons.com/")
+    }
+
+    private fun loadConfigs() {
+        try {
+            val collectablesStr = assets.open("collectables.json").bufferedReader().use { it.readText() }
+            val rootJson = JSONObject(collectablesStr)
+            val jsonCats = rootJson.getJSONArray("categories")
+            val loadedCats = mutableListOf<CategoryItem>()
+
+            for (i in 0 until jsonCats.length()) {
+                val catObj = jsonCats.getJSONObject(i)
+                val catName = catObj.getString("name")
+                val jsonTargets = catObj.getJSONArray("targets")
+                val targets = mutableListOf<TargetItem>()
+
+                for (j in 0 until jsonTargets.length()) {
+                    val tObj = jsonTargets.getJSONObject(j)
+                    targets.add(TargetItem(tObj.getString("name"), tObj.getInt("class_id")))
+                }
+                loadedCats.add(CategoryItem(catName, targets))
+            }
+            categoriesData = loadedCats
+            addLog("Wczytano collectables.json pomyślnie.")
+        } catch (e: Exception) {
+            addLog("Błąd wczytywania collectables.json: ${e.message}")
+        }
+
+        try {
+            val locationsStr = assets.open("locations.json").bufferedReader().use { it.readText() }
+            val locJson = JSONObject(locationsStr).getJSONObject("default_scan_area")
+            scanArea = ScanArea(
+                locJson.getDouble("start_x_pct").toFloat(),
+                locJson.getDouble("end_x_pct").toFloat(),
+                locJson.getDouble("start_y_pct").toFloat(),
+                locJson.getDouble("end_y_pct").toFloat()
+            )
+            addLog("Wczytano locations.json pomyślnie.")
+        } catch (e: Exception) {
+            addLog("Błąd wczytywania locations.json: ${e.message}")
+        }
     }
 
     private fun buildInterface() {
@@ -87,34 +135,35 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT (Canvas Engine)"
-            textSize = 20f
+            text = "JAWIJK WOD BOT (ONNX + JSON)"
+            textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
             setPadding(4, 8, 4, 12)
         }
         root.addView(title)
 
-        categorySpinner = Spinner(this)
-        categorySpinner.adapter = makeAdapter(listOf("Ryby podstawowe", "Ryby Mystras"))
+        categorySpinner = Spinner(this).apply {
+            adapter = makeAdapter(categoriesData.map { it.name })
+        }
         root.addView(categorySpinner)
 
         targetSpinner = Spinner(this)
-        targetSpinner.adapter = makeAdapter(basicTargets)
+        updateTargetSpinner(0)
         root.addView(targetSpinner)
 
         categorySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val targets = if (position == 1) mystrasTargets else basicTargets
-                targetSpinner.adapter = makeAdapter(targets)
-                scanStatus.text = "Wybierz surowiec i uruchom bota."
+                updateTargetSpinner(position)
+                scanStatus.text = "Zmieniono kategorię. Wybierz cel."
             }
         }
 
-        intervalSpinner = Spinner(this)
-        intervalSpinner.adapter = makeAdapter(intervalValues.map { "$it sekund" })
-        intervalSpinner.setSelection(1)
+        intervalSpinner = Spinner(this).apply {
+            adapter = makeAdapter(intervalValues.map { "$it sekund" })
+            setSelection(1)
+        }
         root.addView(intervalSpinner)
 
         val buttons = LinearLayout(this).apply {
@@ -155,7 +204,6 @@ class MainActivity : Activity() {
         webContainer = FrameLayout(this)
         webView = WebView(this)
         webContainer.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-
         root.addView(webContainer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         val logButton = Button(this).apply { text = "POKAŻ / UKRYJ LOG" }
@@ -180,6 +228,13 @@ class MainActivity : Activity() {
     private fun makeAdapter(items: List<String>): ArrayAdapter<String> {
         return ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
             it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+    }
+
+    private fun updateTargetSpinner(categoryIndex: Int) {
+        if (categoriesData.isNotEmpty() && categoryIndex < categoriesData.size) {
+            val targets = categoriesData[categoryIndex].targets.map { it.name }
+            targetSpinner.adapter = makeAdapter(targets)
         }
     }
 
@@ -223,12 +278,22 @@ class MainActivity : Activity() {
     }
 
     private fun selectedInterval() = intervalValues.getOrElse(intervalSpinner.selectedItemPosition) { 20 }
-    private fun selectedTarget() = targetSpinner.selectedItem?.toString() ?: ""
+    
+    private fun selectedTargetItem(): TargetItem? {
+        val catPos = categorySpinner.selectedItemPosition
+        val targetPos = targetSpinner.selectedItemPosition
+        return categoriesData.getOrNull(catPos)?.targets?.getOrNull(targetPos)
+    }
 
     private fun startScanning() {
         if (running) return
+        if (ortSession == null) {
+            scanStatus.text = "Błąd: Brak modelu ONNX!"
+            addLog("Nie można uruchomić bota - model ONNX nie został załadowany.")
+            return
+        }
         running = true
-        status.text = "Status: bot działa (Canvas Engine)"
+        status.text = "Status: bot działa (ONNX + JSON)"
         status.setTextColor(Color.GREEN)
         addLog("Uruchomiono bota.")
         handler.removeCallbacks(scanRunnable)
@@ -244,13 +309,14 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    private fun scanAndClickCanvas() {
+    private fun scanAndClickWithOnnx() {
         val active = popupWebView ?: webView
         if (active.width <= 0 || active.height <= 0) return
 
         scanCount++
-        scanStatus.text = "Skanowanie nr $scanCount (Canvas)..."
-        val target = selectedTarget()
+        val currentTarget = selectedTargetItem()
+        scanStatus.text = "Skanowanie nr $scanCount (${currentTarget?.name ?: "Cel"})..."
+        val session = ortSession ?: return
 
         val bitmap = try {
             Bitmap.createBitmap(active.width, active.height, Bitmap.Config.ARGB_8888).also {
@@ -261,69 +327,82 @@ class MainActivity : Activity() {
             return
         }
 
-        // Skanujemy wyłącznie obszar wody (pomijamy górne menu i dolny czat: Y od 25% do 65% wysokości)
-        val startX = (bitmap.width * 0.1f).toInt()
-        val endX = (bitmap.width * 0.9f).toInt()
-        val startY = (bitmap.height * 0.25f).toInt()
-        val endY = (bitmap.height * 0.65f).toInt()
+        try {
+            val targetWidth = 640
+            val targetHeight = 640
+            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
 
-        var foundX = -1
-        var foundY = -1
-
-        // Skanujemy z krokiem co 6 pikseli dla wydajności
-        outer@ for (y in startY..endY step 6) {
-            for (x in startX..endX step 6) {
-                val pixel = bitmap.getPixel(x, y)
-                val r = Color.red(pixel)
-                val g = Color.green(pixel)
-                val b = Color.blue(pixel)
-
-                // Definicja warunków kolorystycznych dla konkretnego surowca
-                val isMatch = when (target) {
-                    "Niebieski" -> b > 140 && b > r + 30 && g > 100 // Jasny, żywy niebieski fali
-                    "Zielony" -> g > 140 && g > r + 20             // Jasna zieleń
-                    "Fioletowy" -> r > 120 && b > 120 && g < 100   // Fiolet / purpura
-                    "Czerwony" -> r > 160 && g < 80 && b < 80      // Jaskrawa czerwień
-                    else -> (r + g + b) / 3 > 200                  // Szary / Biały błysk
-                }
-
-                if (isMatch) {
-                    foundX = x
-                    foundY = y
-                    break@outer
+            val tensorBuffer = FloatBuffer.allocate(3 * targetWidth * targetHeight)
+            for (channel in 0..2) {
+                for (y in 0 until targetHeight) {
+                    for (x in 0 until targetWidth) {
+                        val px = scaledBitmap.getPixel(x, y)
+                        val v = when (channel) {
+                            0 -> Color.red(px)
+                            1 -> Color.green(px)
+                            else -> Color.blue(px)
+                        }
+                        tensorBuffer.put(v.toFloat() / 255.0f)
+                    }
                 }
             }
-        }
+            tensorBuffer.rewind()
+            scaledBitmap.recycle()
 
-        bitmap.recycle()
+            val shape = longArrayOf(1, 3, targetHeight.toLong(), targetWidth.toLong())
+            val inputTensor = OnnxTensor.createTensor(ortEnvironment, tensorBuffer, shape)
+            val inputName = session.inputNames.iterator().next()
 
-        if (foundX != -1 && foundY != -1) {
-            // NATURALNA RANDOMIZACJA KLIKNIĘCIA:
-            // Dodajemy losowe przesunięcie od -8px do +8px, żeby nie klikać idealnie w ten sam punkt
-            val offsetX = Random.nextInt(-8, 9)
-            val offsetY = Random.nextInt(-8, 9)
+            val results = session.run(mapOf(inputName to inputTensor))
+            inputTensor.close()
 
-            val finalX = (foundX + offsetX + active.scrollX).toFloat()
-            val finalY = (foundY + offsetY + active.scrollY).toFloat()
+            val outputVal = results[0].value
+            results.close()
 
-            performHumanClick(active, finalX, finalY)
+            val expectedClassId = currentTarget?.classId ?: 0
+            var foundX = -1f
+            var foundY = -1f
 
-            scanStatus.text = "Znaleziono $target! Klik: ($finalX, $finalY)"
-            addLog("Skan $scanCount | Trafienie ($target) w pikselu ($foundX, $foundY). Klik w ($finalX, $finalY)")
-        } else {
-            scanStatus.text = "Nie znaleziono $target na wodze."
-            addLog("Skan $scanCount | Brak surowca $target w obszarze wody.")
+            // Przykładowe parsowanie wyjścia z modelu ONNX
+            // Dostosuj tę sekcję, jeśli Twój model zwraca tablicę o konkretnym formacie
+            if (outputVal is Array<*>) {
+                // Przykład odczytu dla formatu macierzowego detektora
+                // Załóżmy, że model zwraca wykryte obiekty
+            }
+
+            if (foundX != -1f && foundY != -1f) {
+                // Przeliczenie współrzędnych z modelu 640x640 na faktyczną rozdzielczość WebView
+                val scaleX = active.width.toFloat() / targetWidth.toFloat()
+                val scaleY = active.height.toFloat() / targetHeight.toFloat()
+                
+                val finalX = (foundX * scaleX) + active.scrollX
+                val finalY = (foundY * scaleY) + active.scrollY
+
+                val offsetX = Random.nextInt(-6, 7)
+                val offsetY = Random.nextInt(-6, 7)
+
+                performHumanClick(active, finalX + offsetX, finalY + offsetY)
+                scanStatus.text = "Znaleziono ${currentTarget?.name}!"
+                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId. Klik w skali ekranu.")
+            } else {
+                scanStatus.text = "Nie znaleziono ${currentTarget?.name}."
+                addLog("Skan $scanCount | Model nie wykrył szukanego surowca.")
+            }
+
+        } catch (e: Exception) {
+            scanStatus.text = "Błąd ONNX: ${e.message}"
+            addLog("Wyjątek ONNX: ${e.message}")
+        } finally {
+            bitmap.recycle()
         }
     }
 
     private fun performHumanClick(view: View, x: Float, y: Float) {
         val now = android.os.SystemClock.uptimeMillis()
         val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
-        
         view.dispatchTouchEvent(down)
         down.recycle()
 
-        // Losowy czas przytrzymania palca na ekranie (70ms - 150ms)
         val holdDuration = Random.nextLong(70, 150)
         handler.postDelayed({
             val upTime = android.os.SystemClock.uptimeMillis()
@@ -336,21 +415,13 @@ class MainActivity : Activity() {
     private fun addLog(message: String) {
         if (!::logText.isInitialized) return
         runOnUiThread {
-            val time = java.text.SimpleDateFormat(
-                "HH:mm:ss",
-                java.util.Locale.getDefault()
-            ).format(java.util.Date())
+            val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
             logText.append("[$time] $message\n")
-
             if (logText.lineCount > 300) {
-                val all = logText.text.toString()
-                logText.text = all.takeLast(12000)
+                logText.text = logText.text.toString().takeLast(12000)
             }
-
             if (::logScroll.isInitialized) {
-                logScroll.post {
-                    logScroll.fullScroll(View.FOCUS_DOWN)
-                }
+                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
             }
         }
     }
@@ -358,6 +429,9 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         running = false
         handler.removeCallbacksAndMessages(null)
+        try {
+            ortSession?.close()
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 }
