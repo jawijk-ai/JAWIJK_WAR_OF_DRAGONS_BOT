@@ -17,10 +17,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.random.Random
 
-// Modele danych dla JSON
-data class TargetItem(val name: String, val classId: Int)
-data class CategoryItem(val name: String, val targets: List<TargetItem>)
-
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
@@ -28,7 +24,6 @@ class MainActivity : Activity() {
 
     private lateinit var status: TextView
     private lateinit var scanStatus: TextView
-    private lateinit var categorySpinner: Spinner
     private lateinit var targetSpinner: Spinner
     private lateinit var intervalSpinner: Spinner
     private lateinit var logText: TextView
@@ -40,8 +35,8 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // Dane z plików JSON
-    private var categoriesData: List<CategoryItem> = listOf()
+    // Dynamiczna lista aktualnie dostępnych celów na lokacji
+    private var currentAvailableTargets: MutableList<String> = mutableListOf("Wczytaj lokację...")
 
     private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
 
@@ -61,7 +56,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        loadConfigs()
         buildInterface()
         configureWebView()
         webView.loadUrl("https://warofdragons.com/")
@@ -81,32 +75,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun loadConfigs() {
-        try {
-            val collectablesStr = assets.open("collectables.json").bufferedReader().use { it.readText() }
-            val rootJson = JSONObject(collectablesStr)
-            val jsonCats = rootJson.getJSONArray("categories")
-            val loadedCats = mutableListOf<CategoryItem>()
-
-            for (i in 0 until jsonCats.length()) {
-                val catObj = jsonCats.getJSONObject(i)
-                val catName = catObj.getString("name")
-                val jsonTargets = catObj.getJSONArray("targets")
-                val targets = mutableListOf<TargetItem>()
-
-                for (j in 0 until jsonTargets.length()) {
-                    val tObj = jsonTargets.getJSONObject(j)
-                    targets.add(TargetItem(tObj.getString("name"), tObj.getInt("class_id")))
-                }
-                loadedCats.add(CategoryItem(catName, targets))
-            }
-            categoriesData = loadedCats
-            addLog("Wczytano collectables.json pomyślnie.")
-        } catch (e: Exception) {
-            addLog("Błąd wczytywania collectables.json: ${e.message}")
-        }
-    }
-
     private fun buildInterface() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -115,7 +83,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT (DOM-FIRST)"
+            text = "JAWIJK WOD BOT (DYNAMIC DOM)"
             textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -123,22 +91,16 @@ class MainActivity : Activity() {
         }
         root.addView(title)
 
-        categorySpinner = Spinner(this).apply {
-            adapter = makeAdapter(categoriesData.map { it.name })
+        // Przycisk do ręcznego odświeżenia listy surowców z aktualnej lokacji
+        val refreshTargetsBtn = Button(this).apply {
+            text = "ODŚWIEŻ SUROWCE Z LOKACJI"
+            setOnClickListener { refreshLocationTargets() }
         }
-        root.addView(categorySpinner)
+        root.addView(refreshTargetsBtn)
 
         targetSpinner = Spinner(this)
-        updateTargetSpinner(0)
+        updateTargetSpinner()
         root.addView(targetSpinner)
-
-        categorySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                updateTargetSpinner(position)
-                scanStatus.text = "Zmieniono kategorię. Wybierz cel."
-            }
-        }
 
         intervalSpinner = Spinner(this).apply {
             adapter = makeAdapter(intervalValues.map { "$it sekund" })
@@ -165,7 +127,6 @@ class MainActivity : Activity() {
         buttons.addView(stopButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons)
 
-        // Przycisk awaryjny do zamknięcia okna logowania / popupu
         val closePopupBtn = Button(this).apply {
             text = "ZAMKNIJ OKNO LOGOWANIA"
             setOnClickListener {
@@ -227,11 +188,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateTargetSpinner(categoryIndex: Int) {
-        if (categoriesData.isNotEmpty() && categoryIndex < categoriesData.size) {
-            val targets = categoriesData[categoryIndex].targets.map { t -> t.name }
-            targetSpinner.adapter = makeAdapter(targets)
-        }
+    private fun updateTargetSpinner() {
+        targetSpinner.adapter = makeAdapter(currentAvailableTargets)
     }
 
     private fun configureWebView() {
@@ -299,18 +257,16 @@ class MainActivity : Activity() {
 
     private fun selectedInterval() = intervalValues.getOrElse(intervalSpinner.selectedItemPosition) { 20 }
     
-    private fun selectedTargetItem(): TargetItem? {
-        val catPos = categorySpinner.selectedItemPosition
-        val targetPos = targetSpinner.selectedItemPosition
-        return categoriesData.getOrNull(catPos)?.targets?.getOrNull(targetPos)
+    private fun selectedTargetName(): String {
+        return targetSpinner.selectedItem?.toString() ?: ""
     }
 
     private fun startScanning() {
         if (running) return
         running = true
-        status.text = "Status: bot działa (DOM-First)"
+        status.text = "Status: bot działa (Dynamic DOM)"
         status.setTextColor(Color.GREEN)
-        addLog("Uruchomiono bota w trybie DOM-First.")
+        addLog("Uruchomiono bota.")
         handler.removeCallbacks(scanRunnable)
         handler.post(scanRunnable)
     }
@@ -324,23 +280,71 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    // GŁÓwna metoda: Odczyt z kodu gry (DOM) i automatyczne kliknięcie w pozycję elementu
+    // Funkcja odpytująca DOM o listę aktualnie dostępnych surowców i aktualizująca Spinner
+    private fun refreshLocationTargets() {
+        val active = popupWebView ?: webView
+        val jsCode = """
+            (function() {
+                var foundNames = [];
+                var elements = document.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
+                elements.forEach(function(el) {
+                    var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').trim();
+                    if (text.length > 2 && !foundNames.includes(text)) {
+                        foundNames.push(text);
+                    }
+                });
+                return JSON.stringify(foundNames);
+            })();
+        """.trimIndent()
+
+        active.evaluateJavascript(jsCode) { rawResult ->
+            try {
+                var jsonResult = rawResult ?: "[]"
+                if (jsonResult.startsWith("\"") && jsonResult.endsWith("\"")) {
+                    jsonResult = jsonResult.substring(1, jsonResult.length - 1)
+                        .replace("\\\"", "\"")
+                        .replace("\\\\", "\\")
+                }
+
+                if (jsonResult != "null" && jsonResult != "[]" && jsonResult.isNotBlank()) {
+                    val jsonArray = JSONArray(jsonResult)
+                    val newTargets = mutableListOf<String>()
+                    for (i in 0 until jsonArray.length()) {
+                        newTargets.add(jsonArray.getString(i))
+                    }
+                    if (newTargets.isNotEmpty()) {
+                        runOnUiThread {
+                            currentAvailableTargets = newTargets
+                            updateTargetSpinner()
+                            addLog("Zaktualizowano listę surowców z lokacji: ${newTargets.size} pozycji.")
+                        }
+                    }
+                } else {
+                    addLog("Brak surowców wykrytych w DOM na tej lokacji.")
+                }
+            } catch (e: Exception) {
+                addLog("Błąd odświeżania listy surowców: ${e.message}")
+            }
+        }
+    }
+
     private fun fetchAndClickFromDOM() {
         val active = popupWebView ?: webView
         if (active.width <= 0 || active.height <= 0) return
 
         scanCount++
-        val currentTarget = selectedTargetItem() ?: return
-        scanStatus.text = "Skanowanie DOM nr $scanCount (${currentTarget.name})..."
+        val targetName = selectedTargetName()
+        if (targetName.isBlank() || targetName.startsWith("Wczytaj")) {
+            scanStatus.text = "Wybierz poprawny cel!"
+            return
+        }
 
-        // Skrypt JavaScript przeszukujący elementy gry w poszukiwaniu obiektów pasujących do wybranego celu oraz ich pozycji (bounding client rect)
+        scanStatus.text = "Skanowanie nr $scanCount ($targetName)..."
+
         val jsCode = """
             (function() {
-                var targetName = "${currentTarget.name}".toLowerCase();
+                var targetName = "$targetName".toLowerCase();
                 var results = [];
-                
-                // Szukamy elementów w grze, które reprezentują zasoby/moby na planszy (np. ikony, linki, obiekty z klasami gry)
-                // Przesukujemy powszechne selektory interaktywne na mapie
                 var elements = document.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
                 
                 elements.forEach(function(el) {
@@ -360,12 +364,18 @@ class MainActivity : Activity() {
             })();
         """.trimIndent()
 
-        active.evaluateJavascript(jsCode) { jsonResult ->
+        active.evaluateJavascript(jsCode) { rawResult ->
             try {
-                if (jsonResult != null && jsonResult != "null" && jsonResult != "[]") {
+                var jsonResult = rawResult ?: "[]"
+                if (jsonResult.startsWith("\"") && jsonResult.endsWith("\"")) {
+                    jsonResult = jsonResult.substring(1, jsonResult.length - 1)
+                        .replace("\\\"", "\"")
+                        .replace("\\\\", "\\")
+                }
+
+                if (jsonResult != "null" && jsonResult != "[]" && jsonResult.isNotBlank()) {
                     val jsonArray = JSONArray(jsonResult)
                     if (jsonArray.length() > 0) {
-                        // Pobieramy współrzędne pierwszego znalezionego elementu
                         val obj = jsonArray.getJSONObject(0)
                         val x = obj.getDouble("x").toFloat()
                         val y = obj.getDouble("y").toFloat()
@@ -377,15 +387,15 @@ class MainActivity : Activity() {
                         val offsetY = Random.nextInt(-4, 5)
 
                         performHumanClick(active, finalX + offsetX, finalY + offsetY)
-                        scanStatus.text = "Znaleziono i kliknięto ${currentTarget.name}!"
-                        addLog("Skan $scanCount | DOM: Kliknięto ${currentTarget.name} w punkcie ($finalX, $finalY).")
+                        scanStatus.text = "Znaleziono i kliknięto $targetName!"
+                        addLog("Skan $scanCount | Kliknięto $targetName w punkcie ($finalX, $finalY).")
                         return@evaluateJavascript
                     }
                 }
-                scanStatus.text = "Nie znaleziono ${currentTarget.name} w DOM."
-                addLog("Skan $scanCount | DOM: Brak obiektów dla '${currentTarget.name}'.")
+                scanStatus.text = "Nie znaleziono $targetName."
+                addLog("Skan $scanCount | Brak obiektu '$targetName' na planszy.")
             } catch (e: Exception) {
-                addLog("Błąd parsowania wynikowej pozycji DOM: ${e.message}")
+                addLog("Błąd kliknięcia DOM: ${e.message}")
             }
         }
     }
