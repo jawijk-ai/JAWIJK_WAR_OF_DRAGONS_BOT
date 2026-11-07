@@ -14,7 +14,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import org.json.JSONArray
-import org.json.JSONObject
 import kotlin.random.Random
 
 class MainActivity : Activity() {
@@ -35,7 +34,7 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // Dynamiczna lista aktualnie dostępnych celów na lokacji
+    // Dynamiczna lista aktualnie dostępnych celów z lokacji
     private var currentAvailableTargets: MutableList<String> = mutableListOf("Wczytaj lokację...")
 
     private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
@@ -91,7 +90,7 @@ class MainActivity : Activity() {
         }
         root.addView(title)
 
-        // Przycisk do ręcznego odświeżenia listy surowców z aktualnej lokacji
+        // Przycisk odświeżania listy surowców bezpośrednio z danej lokacji
         val refreshTargetsBtn = Button(this).apply {
             text = "ODŚWIEŻ SUROWCE Z LOKACJI"
             setOnClickListener { refreshLocationTargets() }
@@ -280,19 +279,44 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    // Funkcja odpytująca DOM o listę aktualnie dostępnych surowców i aktualizująca Spinner
+    // Precyzyjne odczytywanie surowców i potworów wyłącznie z obiektów mapy/lokacji
     private fun refreshLocationTargets() {
         val active = popupWebView ?: webView
         val jsCode = """
             (function() {
                 var foundNames = [];
-                var elements = document.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
-                elements.forEach(function(el) {
-                    var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').trim();
-                    if (text.length > 2 && !foundNames.includes(text)) {
-                        foundNames.push(text);
-                    }
+                
+                // Szukamy w głównym dokumencie oraz we wszystkich ramkach (iframe)
+                var docs = [document];
+                var iframes = document.querySelectorAll('iframe');
+                iframes.forEach(function(f) {
+                    try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){}
                 });
+
+                // Ignorowane wyrażenia z interfejsu użytkownika
+                var ignoreList = ["tablica", "poziom", "stopień", "męstwo", "opis", "wybr.", "emo", "rang", "chosen", "doświadczenia"];
+
+                docs.forEach(function(doc) {
+                    // Selektory nakierowane na elementy obiektów gry, zasobów i potworów
+                    var selector = '.map-object, .resource, .monster, [data-name], .location-objects span, .location-objects div';
+                    var elements = doc.querySelectorAll(selector);
+                    
+                    elements.forEach(function(el) {
+                        var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').trim();
+                        var lower = text.toLowerCase();
+
+                        if (text.length > 2) {
+                            var shouldIgnore = ignoreList.some(function(word) {
+                                return lower.includes(word);
+                            });
+
+                            if (!shouldIgnore && !foundNames.includes(text)) {
+                                foundNames.push(text);
+                            }
+                        }
+                    });
+                });
+                
                 return JSON.stringify(foundNames);
             })();
         """.trimIndent()
@@ -345,19 +369,27 @@ class MainActivity : Activity() {
             (function() {
                 var targetName = "$targetName".toLowerCase();
                 var results = [];
-                var elements = document.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
                 
-                elements.forEach(function(el) {
-                    var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').toLowerCase();
-                    if (text.includes(targetName)) {
-                        var rect = el.getBoundingClientRect();
-                        if (rect.width > 0 && rect.height > 0) {
-                            results.push({
-                                x: rect.left + rect.width / 2,
-                                y: rect.top + rect.height / 2
-                            });
+                var docs = [document];
+                var iframes = document.querySelectorAll('iframe');
+                iframes.forEach(function(f) {
+                    try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){}
+                });
+
+                docs.forEach(function(doc) {
+                    var elements = doc.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
+                    elements.forEach(function(el) {
+                        var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').toLowerCase();
+                        if (text.includes(targetName)) {
+                            var rect = el.getBoundingClientRect();
+                            if (rect.width > 0 && rect.height > 0) {
+                                results.push({
+                                    x: rect.left + rect.width / 2,
+                                    y: rect.top + rect.height / 2
+                                });
+                            }
                         }
-                    }
+                    });
                 });
                 
                 return JSON.stringify(results);
