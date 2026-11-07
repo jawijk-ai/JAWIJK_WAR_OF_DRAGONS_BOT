@@ -87,6 +87,20 @@ class MainActivity : Activity() {
         webView.loadUrl("https://warofdragons.com/")
     }
 
+    private fun addLog(message: String) {
+        if (!::logText.isInitialized) return
+        runOnUiThread {
+            val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+            logText.append("[$time] $message\n")
+            if (logText.lineCount > 300) {
+                logText.text = logText.text.toString().takeLast(12000)
+            }
+            if (::logScroll.isInitialized) {
+                logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+            }
+        }
+    }
+
     private fun loadConfigs() {
         try {
             val collectablesStr = assets.open("collectables.json").bufferedReader().use { it.readText() }
@@ -185,7 +199,7 @@ class MainActivity : Activity() {
         buttons.addView(stopButton, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(buttons)
 
-        // Przycisk do automatycznego kliknięcia "Gotowe" w oknie gry[cite: 3]
+        // Przycisk do automatycznego kliknięcia "Gotowe" w oknie gry
         val gotoweButton = Button(this).apply {
             text = "KLIKNIJ 'GOTOWE' W OKNIE"
             setOnClickListener { clickGotoweButton() }
@@ -256,7 +270,7 @@ class MainActivity : Activity() {
 
     private fun updateTargetSpinner(categoryIndex: Int) {
         if (categoriesData.isNotEmpty() && categoryIndex < categoriesData.size) {
-            val targets = categoriesData[categoryIndex].targets.map { it.name }
+            val targets = categoriesData[categoryIndex].targets.map { t -> t.name }
             targetSpinner.adapter = makeAdapter(targets)
         }
     }
@@ -279,6 +293,7 @@ class MainActivity : Activity() {
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
+                val chromeClientRef = this
                 val popup = WebView(this@MainActivity).apply {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
@@ -291,7 +306,7 @@ class MainActivity : Activity() {
                             addLog("Popup URL: $url")
                         }
                     }
-                    webChromeClient = this@object
+                    webChromeClient = chromeClientRef
                 }
 
                 popupWebView?.let { old ->
@@ -323,7 +338,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // Funkcja automatycznie klikająca przycisk "Gotowe" w oknie gry[cite: 3]
     private fun clickGotoweButton() {
         val active = popupWebView ?: webView
         val jsCode = """
@@ -375,4 +389,149 @@ class MainActivity : Activity() {
         running = false
         handler.removeCallbacks(scanRunnable)
         status.text = "Status: zatrzymany"
-        status
+        status.setTextColor(Color.RED)
+        scanStatus.text = "Bot zatrzymany."
+        addLog("Zatrzymano bota.")
+    }
+
+    private fun scanAndClickWithOnnx() {
+        val active = popupWebView ?: webView
+        if (active.width <= 0 || active.height <= 0) return
+
+        scanCount++
+        val currentTarget = selectedTargetItem()
+        scanStatus.text = "Skanowanie nr $scanCount (${currentTarget?.name ?: "Cel"})..."
+        val session = ortSession ?: return
+
+        val bitmap = try {
+            Bitmap.createBitmap(active.width, active.height, Bitmap.Config.ARGB_8888).also {
+                active.draw(Canvas(it))
+            }
+        } catch (e: Exception) {
+            scanStatus.text = "Błąd zrzutu: ${e.message}"
+            return
+        }
+
+        try {
+            val targetWidth = 128
+            val targetHeight = 128
+            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true)
+
+            val tensorBuffer = FloatBuffer.allocate(3 * targetWidth * targetHeight)
+            for (channel in 0..2) {
+                for (y in 0 until targetHeight) {
+                    for (x in 0 until targetWidth) {
+                        val px = scaledBitmap.getPixel(x, y)
+                        val v = when (channel) {
+                            0 -> Color.red(px)
+                            1 -> Color.green(px)
+                            else -> Color.blue(px)
+                        }
+                        tensorBuffer.put(v.toFloat() / 255.0f)
+                    }
+                }
+            }
+            tensorBuffer.rewind()
+            scaledBitmap.recycle()
+
+            val shape = longArrayOf(1, 3, targetHeight.toLong(), targetWidth.toLong())
+            val inputTensor = OnnxTensor.createTensor(ortEnvironment, tensorBuffer, shape)
+            val inputName = session.inputNames.iterator().next()
+
+            val results = session.run(mapOf(inputName to inputTensor))
+            inputTensor.close()
+
+            val outputVal = results[0].value
+            results.close()
+
+            val expectedClassId = currentTarget?.classId ?: 0
+            var foundX = -1f
+            var foundY = -1f
+
+            try {
+                if (outputVal is Array<*>) {
+                    for (row in outputVal) {
+                        if (row is FloatArray && row.size >= 6) {
+                            val xCoord = row[0]
+                            val yCoord = row[1]
+                            val confidence = row[4]
+                            val classId = row[5].toInt()
+
+                            if (classId == expectedClassId && confidence > 0.5f) {
+                                foundX = xCoord
+                                foundY = yCoord
+                                break
+                            }
+                        } else if (row is Array<*>) {
+                            for (innerRow in row) {
+                                if (innerRow is FloatArray && innerRow.size >= 6) {
+                                    val xCoord = innerRow[0]
+                                    val yCoord = innerRow[1]
+                                    val confidence = innerRow[4]
+                                    val classId = innerRow[5].toInt()
+
+                                    if (classId == expectedClassId && confidence > 0.5f) {
+                                        foundX = xCoord
+                                        foundY = yCoord
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                        if (foundX != -1f) break
+                    }
+                }
+            } catch (parseEx: Exception) {
+                addLog("Błąd parsowania wyjścia ONNX: ${parseEx.message}")
+            }
+
+            if (foundX != -1f && foundY != -1f) {
+                val scaleX = active.width.toFloat() / targetWidth.toFloat()
+                val scaleY = active.height.toFloat() / targetHeight.toFloat()
+                
+                val finalX = (foundX * scaleX) + active.scrollX
+                val finalY = (foundY * scaleY) + active.scrollY
+
+                val offsetX = Random.nextInt(-6, 7)
+                val offsetY = Random.nextInt(-6, 7)
+
+                performHumanClick(active, finalX + offsetX, finalY + offsetY)
+                scanStatus.text = "Znaleziono ${currentTarget?.name}!"
+                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId w punkcie ($finalX, $finalY).")
+            } else {
+                scanStatus.text = "Nie znaleziono ${currentTarget?.name}."
+                addLog("Skan $scanCount | Model nie wykrył surowca dla ID $expectedClassId.")
+            }
+
+        } catch (e: Exception) {
+            scanStatus.text = "Błąd ONNX: ${e.message}"
+            addLog("Wyjątek ONNX: ${e.message}")
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun performHumanClick(view: View, x: Float, y: Float) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
+        view.dispatchTouchEvent(down)
+        down.recycle()
+
+        val holdDuration = Random.nextLong(70, 150)
+        handler.postDelayed({
+            val upTime = android.os.SystemClock.uptimeMillis()
+            val up = android.view.MotionEvent.obtain(now, upTime, android.view.MotionEvent.ACTION_UP, x, y, 0)
+            view.dispatchTouchEvent(up)
+            up.recycle()
+        }, holdDuration)
+    }
+
+    override fun onDestroy() {
+        running = false
+        handler.removeCallbacksAndMessages(null)
+        try {
+            ortSession?.close()
+        } catch (_: Exception) {}
+        super.onDestroy()
+    }
+}
