@@ -14,6 +14,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.*
 import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.random.Random
 
 class MainActivity : Activity() {
@@ -34,7 +35,7 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // Dynamiczna lista aktualnie dostępnych celów z lokacji
+    // Dynamiczna lista celów
     private var currentAvailableTargets: MutableList<String> = mutableListOf("Wczytaj lokację...")
 
     private val intervalValues = listOf(10, 20, 30, 45, 60, 90, 120)
@@ -82,7 +83,7 @@ class MainActivity : Activity() {
         }
 
         val title = TextView(this).apply {
-            text = "JAWIJK WOD BOT (DYNAMIC DOM)"
+            text = "JAWIJK WOD BOT (FIXED DOM)"
             textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
@@ -90,7 +91,6 @@ class MainActivity : Activity() {
         }
         root.addView(title)
 
-        // Przycisk odświeżania listy surowców bezpośrednio z danej lokacji
         val refreshTargetsBtn = Button(this).apply {
             text = "ODŚWIEŻ SUROWCE Z LOKACJI"
             setOnClickListener { refreshLocationTargets() }
@@ -263,7 +263,7 @@ class MainActivity : Activity() {
     private fun startScanning() {
         if (running) return
         running = true
-        status.text = "Status: bot działa (Dynamic DOM)"
+        status.text = "Status: bot działa"
         status.setTextColor(Color.GREEN)
         addLog("Uruchomiono bota.")
         handler.removeCallbacks(scanRunnable)
@@ -279,75 +279,64 @@ class MainActivity : Activity() {
         addLog("Zatrzymano bota.")
     }
 
-    // Precyzyjne odczytywanie surowców i potworów wyłącznie z obiektów mapy/lokacji
     private fun refreshLocationTargets() {
         val active = popupWebView ?: webView
         val jsCode = """
             (function() {
                 var foundNames = [];
-                
-                // Szukamy w głównym dokumencie oraz we wszystkich ramkach (iframe)
-                var docs = [document];
-                var iframes = document.querySelectorAll('iframe');
-                iframes.forEach(function(f) {
-                    try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){}
-                });
+                var allElements = document.querySelectorAll('div, span, a, img');
+                var ignoreList = ["tablica", "poziom", "stopień", "męstwo", "opis", "zaloguj", "hasło", "rejestracja", "menu", "główny"];
 
-                // Ignorowane wyrażenia z interfejsu użytkownika
-                var ignoreList = ["tablica", "poziom", "stopień", "męstwo", "opis", "wybr.", "emo", "rang", "chosen", "doświadczenia"];
+                allElements.forEach(function(el) {
+                    var text = (el.innerText || el.getAttribute('alt') || el.getAttribute('title') || '').trim();
+                    var lower = text.toLowerCase();
 
-                docs.forEach(function(doc) {
-                    // Selektory nakierowane na elementy obiektów gry, zasobów i potworów
-                    var selector = '.map-object, .resource, .monster, [data-name], .location-objects span, .location-objects div';
-                    var elements = doc.querySelectorAll(selector);
-                    
-                    elements.forEach(function(el) {
-                        var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').trim();
-                        var lower = text.toLowerCase();
+                    if (text.length > 2 && text.length < 35) {
+                        var shouldIgnore = ignoreList.some(function(word) {
+                            return lower.includes(word);
+                        });
 
-                        if (text.length > 2) {
-                            var shouldIgnore = ignoreList.some(function(word) {
-                                return lower.includes(word);
-                            });
-
-                            if (!shouldIgnore && !foundNames.includes(text)) {
-                                foundNames.push(text);
-                            }
+                        if (!shouldIgnore && !foundNames.includes(text)) {
+                            foundNames.push(text);
                         }
-                    });
+                    }
                 });
                 
-                return JSON.stringify(foundNames);
+                return JSON.stringify({ count: allElements.length, items: foundNames });
             })();
         """.trimIndent()
 
         active.evaluateJavascript(jsCode) { rawResult ->
             try {
-                var jsonResult = rawResult ?: "[]"
+                var jsonResult = rawResult ?: "{}"
                 if (jsonResult.startsWith("\"") && jsonResult.endsWith("\"")) {
                     jsonResult = jsonResult.substring(1, jsonResult.length - 1)
                         .replace("\\\"", "\"")
                         .replace("\\\\", "\\")
                 }
 
-                if (jsonResult != "null" && jsonResult != "[]" && jsonResult.isNotBlank()) {
-                    val jsonArray = JSONArray(jsonResult)
-                    val newTargets = mutableListOf<String>()
-                    for (i in 0 until jsonArray.length()) {
-                        newTargets.add(jsonArray.getString(i))
-                    }
-                    if (newTargets.isNotEmpty()) {
-                        runOnUiThread {
-                            currentAvailableTargets = newTargets
-                            updateTargetSpinner()
-                            addLog("Zaktualizowano listę surowców z lokacji: ${newTargets.size} pozycji.")
-                        }
+                val jsonObj = JSONObject(jsonResult)
+                val totalChecked = jsonObj.optInt("count", 0)
+                val jsonArray = jsonObj.getJSONArray("items")
+
+                val newTargets = mutableListOf<String>()
+                for (i in 0 until jsonArray.length()) {
+                    newTargets.add(jsonArray.getString(i))
+                }
+
+                addLog("Przeskanowano elementów w DOM: $totalChecked, znaleziono: ${newTargets.size}")
+
+                if (newTargets.isNotEmpty()) {
+                    runOnUiThread {
+                        currentAvailableTargets = newTargets
+                        updateTargetSpinner()
+                        addLog("Zaktualizowano listę w Spinnerze.")
                     }
                 } else {
-                    addLog("Brak surowców wykrytych w DOM na tej lokacji.")
+                    addLog("Brak pasujących tekstów w DOM.")
                 }
             } catch (e: Exception) {
-                addLog("Błąd odświeżania listy surowców: ${e.message}")
+                addLog("Błąd parsowania: ${e.message}")
             }
         }
     }
@@ -369,27 +358,19 @@ class MainActivity : Activity() {
             (function() {
                 var targetName = "$targetName".toLowerCase();
                 var results = [];
+                var elements = document.querySelectorAll('div, span, a, img');
                 
-                var docs = [document];
-                var iframes = document.querySelectorAll('iframe');
-                iframes.forEach(function(f) {
-                    try { if (f.contentDocument) docs.push(f.contentDocument); } catch(e){}
-                });
-
-                docs.forEach(function(doc) {
-                    var elements = doc.querySelectorAll('.map-object, .resource, .monster, [data-name], img, div');
-                    elements.forEach(function(el) {
-                        var text = (el.innerText || el.getAttribute('data-name') || el.getAttribute('title') || '').toLowerCase();
-                        if (text.includes(targetName)) {
-                            var rect = el.getBoundingClientRect();
-                            if (rect.width > 0 && rect.height > 0) {
-                                results.push({
-                                    x: rect.left + rect.width / 2,
-                                    y: rect.top + rect.height / 2
-                                });
-                            }
+                elements.forEach(function(el) {
+                    var text = (el.innerText || el.getAttribute('alt') || el.getAttribute('title') || '').toLowerCase();
+                    if (text.includes(targetName)) {
+                        var rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            results.push({
+                                x: rect.left + rect.width / 2,
+                                y: rect.top + rect.height / 2
+                            });
                         }
-                    });
+                    }
                 });
                 
                 return JSON.stringify(results);
