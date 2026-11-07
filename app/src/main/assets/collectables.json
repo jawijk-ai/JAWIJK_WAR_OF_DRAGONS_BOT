@@ -1,0 +1,22 @@
+{
+  "categories": [
+    {
+      "name": "Ryby podstawowe",
+      "targets": [
+        { "name": "Niebieski", "class_id": 0 },
+        { "name": "Zielony", "class_id": 1 },
+        { "name": "Fioletowy", "class_id": 2 },
+        { "name": "Czerwony", "class_id": 3 },
+        { "name": "Szary", "class_id": 4 }
+      ]
+    },
+    {
+      "name": "Ryby Mystras",
+      "targets": [
+        { "name": "Golden Shams", "class_id": 5 },
+        { "name": "Coastal Shamsu", "class_id": 6 },
+        { "name": "Mystras Serpentfish", "class_id": 7 }
+      ]
+    }
+  ]
+}
