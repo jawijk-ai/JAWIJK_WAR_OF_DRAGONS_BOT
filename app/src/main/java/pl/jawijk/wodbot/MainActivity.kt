@@ -441,7 +441,17 @@ class MainActivity : Activity() {
             val results = session.run(mapOf(inputName to inputTensor))
             inputTensor.close()
 
-            val outputVal = results[0].value
+            val outputTensor = results[0]
+            val outputVal = outputTensor.value
+            
+            // DIAGNOSTYKA: Wypisujemy kształt wyjściowy modelu do logów aplikacji
+            val info = StringBuilder("Shape: ")
+            if (outputTensor.info is ai.onnxruntime.TensorInfo) {
+                val tInfo = outputTensor.info as ai.onnxruntime.TensorInfo
+                info.append(tInfo.shape.contentToString())
+            }
+            addLog("ONNX Wyjście [$info]")
+
             results.close()
 
             val expectedClassId = currentTarget?.classId ?: 0
@@ -451,29 +461,32 @@ class MainActivity : Activity() {
             try {
                 if (outputVal is Array<*>) {
                     for (row in outputVal) {
-                        if (row is FloatArray && row.size >= 6) {
-                            val xCoord = row[0]
-                            val yCoord = row[1]
-                            val confidence = row[4]
-                            val classId = row[5].toInt()
-
-                            if (classId == expectedClassId && confidence > 0.5f) {
-                                foundX = xCoord
-                                foundY = yCoord
-                                break
-                            }
-                        } else if (row is Array<*>) {
-                            for (innerRow in row) {
-                                if (innerRow is FloatArray && innerRow.size >= 6) {
-                                    val xCoord = innerRow[0]
-                                    val yCoord = innerRow[1]
-                                    val confidence = innerRow[4]
-                                    val classId = innerRow[5].toInt()
-
-                                    if (classId == expectedClassId && confidence > 0.5f) {
+                        when (row) {
+                            is FloatArray -> {
+                                if (row.size >= 6) {
+                                    val xCoord = row[0]
+                                    val yCoord = row[1]
+                                    val conf = row[4]
+                                    val cls = row[5].toInt()
+                                    if (cls == expectedClassId && conf > 0.3f) {
                                         foundX = xCoord
                                         foundY = yCoord
                                         break
+                                    }
+                                }
+                            }
+                            is Array<*> -> {
+                                for (inner in row) {
+                                    if (inner is FloatArray && inner.size >= 6) {
+                                        val xCoord = inner[0]
+                                        val yCoord = inner[1]
+                                        val conf = inner[4]
+                                        val cls = inner[5].toInt()
+                                        if (cls == expectedClassId && conf > 0.3f) {
+                                            foundX = xCoord
+                                            foundY = yCoord
+                                            break
+                                        }
                                     }
                                 }
                             }
@@ -482,7 +495,7 @@ class MainActivity : Activity() {
                     }
                 }
             } catch (parseEx: Exception) {
-                addLog("Błąd parsowania wyjścia ONNX: ${parseEx.message}")
+                addLog("Błąd parsowania: ${parseEx.message}")
             }
 
             if (foundX != -1f && foundY != -1f) {
@@ -492,15 +505,12 @@ class MainActivity : Activity() {
                 val finalX = (foundX * scaleX) + active.scrollX
                 val finalY = (foundY * scaleY) + active.scrollY
 
-                val offsetX = Random.nextInt(-6, 7)
-                val offsetY = Random.nextInt(-6, 7)
-
-                performHumanClick(active, finalX + offsetX, finalY + offsetY)
+                performHumanClick(active, finalX, finalY)
                 scanStatus.text = "Znaleziono ${currentTarget?.name}!"
-                addLog("Skan $scanCount | Wykryto cel ID $expectedClassId w punkcie ($finalX, $finalY).")
+                addLog("Skan $scanCount | Kliknięto w ($finalX, $finalY).")
             } else {
                 scanStatus.text = "Nie znaleziono ${currentTarget?.name}."
-                addLog("Skan $scanCount | Model nie wykrył surowca dla ID $expectedClassId.")
+                addLog("Skan $scanCount | Brak dopasowania dla ID $expectedClassId.")
             }
 
         } catch (e: Exception) {
